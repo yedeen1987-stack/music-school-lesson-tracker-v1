@@ -14,6 +14,8 @@ GitHub 仓库负责保存代码，不能直接作为这个 FastAPI + SQLite 系�
 
 SQLite 数据库文件保存在运行服务器的 `data/music_school.sqlite3`。只要这个文件所在磁盘是持久化的，课程记录就会一直保存。
 
+本仓库已经加入 `Procfile` 和 `render.yaml`。如果使用 Render，可以创建 Web Service 并连接这个 GitHub 仓库；`render.yaml` 会配置 Python 服务、启动命令和 1GB 持久化磁盘。
+
 ## 推荐 V1 部署方式
 
 第一版建议：
@@ -22,6 +24,13 @@ SQLite 数据库文件保存在运行服务器的 `data/music_school.sqlite3`。
 2. 一台固定电脑或云服务器运行 FastAPI。
 3. SQLite 数据库保存在服务器本地。
 4. 每天执行 `scripts/backup_sqlite.py` 生成备份。
+
+## 通知功能
+
+- 完成本节后立即通知学生和老师，邮件内容包含剩余课时。
+- 管理员可在“基础设置”中设置余额提醒阈值，例如 `10,7,5,3,1`。
+- 当完成课程后余额刚好等于阈值，系统会额外发送“课时余额提醒”。
+- 未配置 SMTP 时，系统不会真正发送邮件，但会写入 `email_logs`，状态为 `disabled`。
 
 ## 启动命令
 
@@ -50,4 +59,3 @@ python scripts/backup_sqlite.py
 ```
 
 恢复时停止服务，用备份文件覆盖 `data/music_school.sqlite3`，再重新启动。
-

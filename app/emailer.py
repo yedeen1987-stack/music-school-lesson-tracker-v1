@@ -68,6 +68,72 @@ def notify_schedule_changed(conn, schedule_id: int):
     send_email(conn, lesson["teacher_email"], "teacher", "课程时间更新", body, "schedule", schedule_id)
 
 
+def notify_lesson_completed(conn, lesson_instance_id: int, balance_after: int):
+    lesson = conn.execute(
+        """
+        SELECT st.name AS student_name, st.email AS student_email,
+               t.name AS teacher_name, t.email AS teacher_email, cp.course_name, li.confirmed_at
+        FROM lesson_instances li
+        JOIN schedules s ON s.id = li.schedule_id
+        JOIN course_packages cp ON cp.id = s.course_package_id
+        JOIN students st ON st.id = cp.student_id
+        JOIN teachers t ON t.id = cp.teacher_id
+        WHERE li.id = ?
+        """,
+        (lesson_instance_id,),
+    ).fetchone()
+    if not lesson:
+        return
+    body = (
+        f"课程已完成\n\n"
+        f"学生：{lesson['student_name']}\n"
+        f"课程：{lesson['course_name']}\n"
+        f"老师：{lesson['teacher_name']}\n"
+        f"确认时间：{lesson['confirmed_at']}\n"
+        f"剩余课时：{balance_after} 节\n"
+    )
+    send_email(conn, lesson["student_email"], "student", "课程完成通知", body, "lesson_instance", lesson_instance_id)
+    send_email(conn, lesson["teacher_email"], "teacher", "课程完成通知", body, "lesson_instance", lesson_instance_id)
+
+
+def notify_low_balance_if_needed(conn, course_package_id: int, balance_after: int):
+    raw = conn.execute("SELECT value FROM settings WHERE key = 'low_balance_thresholds'").fetchone()
+    thresholds = parse_thresholds(raw["value"] if raw else "10,7,5,3,1")
+    if balance_after not in thresholds:
+        return
+    package = conn.execute(
+        """
+        SELECT st.name AS student_name, st.email AS student_email,
+               t.name AS teacher_name, t.email AS teacher_email, cp.course_name
+        FROM course_packages cp
+        JOIN students st ON st.id = cp.student_id
+        JOIN teachers t ON t.id = cp.teacher_id
+        WHERE cp.id = ?
+        """,
+        (course_package_id,),
+    ).fetchone()
+    if not package:
+        return
+    body = (
+        f"课时余额提醒\n\n"
+        f"学生：{package['student_name']}\n"
+        f"课程：{package['course_name']}\n"
+        f"老师：{package['teacher_name']}\n"
+        f"当前剩余：{balance_after} 节\n"
+    )
+    send_email(conn, package["student_email"], "student", "课时余额提醒", body, "course_package", course_package_id)
+    send_email(conn, package["teacher_email"], "teacher", "课时余额提醒", body, "course_package", course_package_id)
+
+
+def parse_thresholds(value: str):
+    thresholds = set()
+    for part in value.replace("，", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            thresholds.add(int(part))
+    return thresholds
+
+
 def create_reminder_logs(conn, target_weekday: int):
     rows = conn.execute(
         """
@@ -91,4 +157,3 @@ def create_reminder_logs(conn, target_weekday: int):
         )
         send_email(conn, row["student_email"], "student", "明天课程提醒", body, "schedule", row["id"])
         send_email(conn, row["teacher_email"], "teacher", "明天课程提醒", body, "schedule", row["id"])
-

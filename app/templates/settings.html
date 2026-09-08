@@ -2,7 +2,15 @@
 {% block content %}
 <h1>基础设置</h1>
 <div class="panel">
-  <p>提醒时间：19:00</p>
+  <form method="post" action="/settings" class="form">
+    <label>课前一天提醒时间
+      <input name="reminder_time" type="time" value="{{ settings_map.get('reminder_time', '19:00') }}">
+    </label>
+    <label>余额提醒
+      <input name="low_balance_thresholds" value="{{ settings_map.get('low_balance_thresholds', '10,7,5,3,1') }}">
+    </label>
+    <button class="primary">保存设置</button>
+  </form>
   <p>邮件账号通过环境变量配置。</p>
 </div>
 <h2 class="subhead">邮件记录</h2>
@@ -18,4 +26,3 @@
 {% endfor %}
 </div>
 {% endblock %}
-

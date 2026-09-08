@@ -13,11 +13,13 @@ from app.services import (
     authenticate,
     create_student,
     current_user,
+    ensure_default_settings,
     init_schema,
     list_today_lessons,
     record_lesson,
     seed_data,
     undo_last_record,
+    update_setting,
     update_schedule,
 )
 
@@ -31,6 +33,7 @@ def startup():
     with db_session() as conn:
         init_schema(conn, SCHEMA_SQL)
         seed_data(conn)
+        ensure_default_settings(conn)
 
 
 def get_user(request: Request):
@@ -246,6 +249,20 @@ def settings(request: Request, user=Depends(get_user)):
         raise HTTPException(403)
     with db_session() as conn:
         settings_rows = conn.execute("SELECT * FROM settings").fetchall()
+        settings_map = {row["key"]: row["value"] for row in settings_rows}
         logs = conn.execute("SELECT * FROM email_logs ORDER BY id DESC LIMIT 50").fetchall()
-        return render(request, "settings.html", {"user": user, "settings": settings_rows, "logs": logs})
+        return render(request, "settings.html", {"user": user, "settings": settings_rows, "settings_map": settings_map, "logs": logs})
 
+
+@app.post("/settings")
+def save_settings(
+    reminder_time: str = Form(...),
+    low_balance_thresholds: str = Form(...),
+    user=Depends(get_user),
+):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        update_setting(conn, "reminder_time", reminder_time)
+        update_setting(conn, "low_balance_thresholds", low_balance_thresholds)
+    return RedirectResponse("/settings", status_code=303)

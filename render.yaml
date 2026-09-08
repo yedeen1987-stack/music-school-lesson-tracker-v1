@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: music-school-lesson-tracker-v1
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/init_db.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////var/data/music_school.sqlite3
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+    disk:
+      name: music-school-data
+      mountPath: /var/data
+      sizeGB: 1

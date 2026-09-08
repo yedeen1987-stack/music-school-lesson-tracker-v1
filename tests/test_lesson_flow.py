@@ -57,6 +57,21 @@ def test_complete_lesson_deducts_one(conn):
     assert balance_for_lesson(conn, lesson["id"]) == before - 1
 
 
+def test_complete_lesson_writes_completion_email_logs(conn):
+    lesson = first_lesson(conn)
+    record_lesson(conn, user(conn, "admin"), lesson["id"], "complete")
+    subjects = [row[0] for row in conn.execute("SELECT subject FROM email_logs ORDER BY id").fetchall()]
+    assert subjects == ["课程完成通知", "课程完成通知"]
+
+
+def test_low_balance_threshold_writes_extra_email_logs(conn):
+    conn.execute("UPDATE settings SET value = '9,7,5,3,1' WHERE key = 'low_balance_thresholds'")
+    lesson = first_lesson(conn)
+    record_lesson(conn, user(conn, "admin"), lesson["id"], "complete")
+    subjects = [row[0] for row in conn.execute("SELECT subject FROM email_logs ORDER BY id").fetchall()]
+    assert subjects == ["课程完成通知", "课程完成通知", "课时余额提醒", "课时余额提醒"]
+
+
 def test_skip_lesson_deducts_zero(conn):
     lesson = first_lesson(conn)
     before = balance_for_lesson(conn, lesson["id"])
@@ -108,4 +123,3 @@ def test_balances_are_per_course_package(conn):
     assert piano_id != guitar_id
     assert conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (piano_id,)).fetchone()[0] == 5
     assert conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (guitar_id,)).fetchone()[0] == 3
-

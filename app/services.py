@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from app.emailer import notify_schedule_changed
+from app.emailer import notify_lesson_completed, notify_low_balance_if_needed, notify_schedule_changed
 
 
 def init_schema(conn, schema_sql: str):
@@ -22,6 +22,12 @@ def seed_data(conn):
     create_student(conn, "Maria", "11 99999-9999", "maria@example.com", "钢琴", wang_id, 10, 0, "14:00")
     create_student(conn, "Lucas", "11 98888-8888", "lucas@example.com", "吉他", li_id, 8, 0, "16:00")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reminder_time', '19:00')")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('low_balance_thresholds', '10,7,5,3,1')")
+
+
+def ensure_default_settings(conn):
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('reminder_time', '19:00')")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('low_balance_thresholds', '10,7,5,3,1')")
 
 
 def current_user(conn, user_id: int | None):
@@ -166,6 +172,13 @@ def record_lesson(conn, user, instance_id, action):
         "INSERT INTO lesson_transactions (course_package_id, lesson_record_id, delta_lessons, reason) VALUES (?, ?, ?, ?)",
         (row["course_package_id"], cur.lastrowid, delta, action),
     )
+    if action == "complete":
+        notify_lesson_completed(conn, instance_id, new_balance)
+        notify_low_balance_if_needed(conn, row["course_package_id"], new_balance)
+
+
+def update_setting(conn, key, value):
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
 
 
 def undo_last_record(conn, user, record_id):
