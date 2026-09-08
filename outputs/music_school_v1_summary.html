@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>音乐机构课时记录小程序 V1</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --text: #202124;
+      --muted: #656b72;
+      --line: #deded8;
+      --brand: #116b5f;
+      --accent: #c35a2e;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      width: min(920px, 100%);
+      margin: 0 auto;
+      padding: 28px 16px 48px;
+    }
+    header {
+      padding: 20px 0 18px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 22px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 5vw, 42px);
+      line-height: 1.15;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 22px;
+    }
+    p { margin: 6px 0; color: var(--muted); }
+    a { color: var(--brand); font-weight: 700; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    li { margin: 5px 0; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eeeeea;
+      border-radius: 6px;
+    }
+    code { padding: 2px 5px; }
+    pre {
+      overflow-x: auto;
+      padding: 14px;
+      border: 1px solid var(--line);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .pill {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      border-radius: 999px;
+      background: #eef4ee;
+      color: var(--brand);
+      padding: 3px 10px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 10px 12px;
+      background: #fff8f4;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="pill">V1 本地可运行</span>
+      <h1>音乐机构课时记录小程序</h1>
+      <p>Python FastAPI + SQLite + 简单响应式中文前端。适合第一版内部使用，手机端优先。</p>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <h3>本地访问</h3>
+        <p><a href="http://127.0.0.1:8000">http://127.0.0.1:8000</a></p>
+      </div>
+      <div class="card">
+        <h3>项目目录</h3>
+        <p><code>/Users/andreye/Documents/Codex/2026-09-06/referenced-chatgpt-conversation-this-is-an</code></p>
+      </div>
+      <div class="card">
+        <h3>验证结果</h3>
+        <p>基础测试已通过：<code>7 passed</code></p>
+      </div>
+    </section>
+
+    <h2>启动命令</h2>
+    <pre><code>source .venv/bin/activate
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</code></pre>
+
+    <h2>默认测试账号</h2>
+    <table>
+      <thead>
+        <tr><th>角色</th><th>账号</th><th>密码</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>管理员</td><td><code>admin</code></td><td><code>admin123</code></td></tr>
+        <tr><td>王老师</td><td><code>wang</code></td><td><code>teacher123</code></td></tr>
+        <tr><td>李老师</td><td><code>li</code></td><td><code>teacher123</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>已实现功能</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>课程与课时</h3>
+        <ul>
+          <li>学生按课程包管理余额</li>
+          <li>固定星期 + 计划时间生成今日课程</li>
+          <li>完成本节扣 1 节</li>
+          <li>跳过今天扣 0 节</li>
+          <li>撤销使用反向流水</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>权限</h3>
+        <ul>
+          <li>管理员查看和管理全部数据</li>
+          <li>老师只看自己的课程、学生余额和记录</li>
+          <li>老师不能操作其他老师课程</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>邮件</h3>
+        <ul>
+          <li>学生和老师都有 Email</li>
+          <li>改课后立即通知学生和老师</li>
+          <li>明日课程提醒脚本</li>
+          <li><code>email_logs</code> 保存发送状态</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>维护</h3>
+        <ul>
+          <li>SQLite 服务端统一数据库</li>
+          <li>初始化脚本和示例数据</li>
+          <li>每日备份脚本</li>
+          <li>README 含启动、邮件、局域网和恢复说明</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>项目结构</h2>
+    <pre><code>app/
+  main.py
+  services.py
+  models.py
+  emailer.py
+  templates/
+  static/style.css
+scripts/
+  init_db.py
+  send_reminders.py
+  backup_sqlite.py
+tests/
+  test_lesson_flow.py
+data/
+  music_school.sqlite3
+README.md
+requirements.txt</code></pre>
+
+    <h2>未实现项</h2>
+    <div class="note">
+      <p>V1 暂不包含支付、发票、请假、缺席、迟到统计、复杂补课、多校区、多管理员细分权限。邮件提醒目前通过脚本配合系统计划任务执行。演示版密码为明文，正式上线前建议改为加密哈希。</p>
+    </div>
+  </main>
+</body>
+</html>

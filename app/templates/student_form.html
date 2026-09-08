@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>新增学生</h1>
+<form method="post" action="/students" class="form">
+  <label>姓名 *<input name="name" required></label>
+  <label>电话<input name="phone"></label>
+  <label>Email *<input name="email" type="email" required></label>
+  <label>课程 *<input name="course_name" required value="钢琴"></label>
+  <label>所属老师 *
+    <select name="teacher_id">{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}</select>
+  </label>
+  <label>购买课时 *<input name="purchased_lessons" type="number" min="0" required value="10"></label>
+  <label>固定上课日 *
+    <select name="weekday">
+      {% for day in ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"] %}
+      <option value="{{ loop.index0 }}">{{ day }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>计划时间 *<input name="planned_time" type="time" required value="14:00"></label>
+  <button class="primary">保存</button>
+</form>
+{% endblock %}
+

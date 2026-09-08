@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>固定排课</h1>
+<div class="list">
+{% for item in schedules %}
+  <article class="item">
+    <h2>{{ ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"][item.weekday] }} {{ item.planned_time }}</h2>
+    <p>{{ item.student_name }} · {{ item.course_name }} · {{ item.teacher_name }}</p>
+    {% if user.role == "admin" %}
+    <form method="post" action="/schedule/{{ item.id }}" class="inline-form">
+      <select name="weekday">{% for day in ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"] %}<option value="{{ loop.index0 }}" {% if loop.index0 == item.weekday %}selected{% endif %}>{{ day }}</option>{% endfor %}</select>
+      <input name="planned_time" type="time" value="{{ item.planned_time }}">
+      <select name="teacher_id">{% for teacher in teachers %}<option value="{{ teacher.id }}" {% if teacher.name == item.teacher_name %}selected{% endif %}>{{ teacher.name }}</option>{% endfor %}</select>
+      <button>保存</button>
+    </form>
+    {% endif %}
+  </article>
+{% else %}
+  <p class="empty">暂无排课</p>
+{% endfor %}
+</div>
+{% endblock %}
+

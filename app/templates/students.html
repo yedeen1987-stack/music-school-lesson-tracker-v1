@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="heading">
+  <h1>学生</h1>
+  {% if user.role == "admin" %}<a class="button" href="/students/new">新增学生</a>{% endif %}
+</section>
+<div class="list">
+{% for student in students %}
+  <a class="item link-item" href="/students/{{ student.id }}">
+    <h2>{{ student.name }}</h2>
+    <p>{{ student.course_name }} · {{ student.teacher_name }}</p>
+    <p>剩余 {{ student.current_balance }} 节</p>
+  </a>
+{% else %}
+  <p class="empty">暂无学生</p>
+{% endfor %}
+</div>
+{% endblock %}
+

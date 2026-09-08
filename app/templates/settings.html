@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>基础设置</h1>
+<div class="panel">
+  <p>提醒时间：19:00</p>
+  <p>邮件账号通过环境变量配置。</p>
+</div>
+<h2 class="subhead">邮件记录</h2>
+<div class="list">
+{% for log in logs %}
+  <article class="item">
+    <div class="row"><strong>{{ log.recipient_email }}</strong><span class="status">{{ log.status }}</span></div>
+    <p>{{ log.subject }} · {{ log.created_at }}</p>
+    {% if log.error %}<p class="error">{{ log.error }}</p>{% endif %}
+  </article>
+{% else %}
+  <p class="empty">暂无邮件记录</p>
+{% endfor %}
+</div>
+{% endblock %}
+

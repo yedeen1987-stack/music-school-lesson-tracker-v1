@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="heading">
+  <div>
+    <h1>今日课程</h1>
+    <p>{{ today }}</p>
+  </div>
+  <span class="pill">{{ "管理员" if user.role == "admin" else "老师" }}</span>
+</section>
+
+<div class="list">
+  {% for lesson in lessons %}
+  <article class="item">
+    <div class="row">
+      <strong>{{ lesson.planned_time }}</strong>
+      <span class="status">{{ {"planned":"待处理","completed":"已完成","skipped":"已跳过"}[lesson.status] }}</span>
+    </div>
+    <h2>{{ lesson.student_name }} · {{ lesson.course_name }}</h2>
+    <p>{{ lesson.teacher_name }} · 剩余 {{ lesson.current_balance }} 节</p>
+    {% if lesson.status == "planned" %}
+    <div class="actions">
+      <form method="post" action="/lessons/{{ lesson.id }}/complete"><button class="primary">完成本节</button></form>
+      <form method="post" action="/lessons/{{ lesson.id }}/skip"><button>跳过今天</button></form>
+    </div>
+    {% endif %}
+  </article>
+  {% else %}
+  <p class="empty">今天没有固定课程</p>
+  {% endfor %}
+</div>
+{% endblock %}
+

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>老师</h1>
+<div class="list">
+{% for teacher in teachers %}
+  <article class="item"><h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p></article>
+{% endfor %}
+</div>
+<form method="post" action="/teachers" class="form">
+  <label>姓名<input name="name" required></label>
+  <label>Email<input name="email" type="email" required></label>
+  <button class="primary">新增老师</button>
+</form>
+{% endblock %}
+

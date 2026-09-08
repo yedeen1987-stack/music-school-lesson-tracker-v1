@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="heading"><h1>{{ student.name }}</h1></section>
+<div class="panel">
+  <p>电话：{{ student.phone or "-" }}</p>
+  <p>Email：{{ student.email }}</p>
+</div>
+<h2 class="subhead">课程包</h2>
+<div class="list">
+{% for package in packages %}
+  <article class="item">
+    <h2>{{ package.course_name }}</h2>
+    <p>{{ package.teacher_name }} · 购买 {{ package.purchased_lessons }} 节 · 剩余 {{ package.current_balance }} 节</p>
+  </article>
+{% endfor %}
+</div>
+{% if user.role == "admin" %}
+<h2 class="subhead">增加课时包</h2>
+<form method="post" action="/students/{{ student.id }}/packages" class="form">
+  <label>课程<input name="course_name" required></label>
+  <label>老师<select name="teacher_id">{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}</select></label>
+  <label>购买课时<input name="purchased_lessons" type="number" min="0" value="10"></label>
+  <button class="primary">增加</button>
+</form>
+{% endif %}
+{% endblock %}
+
