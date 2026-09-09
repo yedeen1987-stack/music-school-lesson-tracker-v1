@@ -5,6 +5,8 @@ import smtplib
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 
+from app.security import sign_student_token
+
 # 第 n 次投递失败后，等待多久再重试。用完就标记为 failed。
 RETRY_BACKOFF_MINUTES = (1, 5, 15)
 MAX_ATTEMPTS = len(RETRY_BACKOFF_MINUTES) + 1
@@ -105,6 +107,18 @@ def process_email_queue(conn, limit: int = 20, sender=None):
     return sent, failed
 
 
+def portal_url(conn, student_id: int) -> str:
+    """学生自助查询链接。没设置 public_base_url 时返回空串，邮件里就不带链接。"""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'public_base_url'").fetchone()
+    base = (row["value"] if row else "").strip().rstrip("/")
+    return f"{base}/p/{sign_student_token(student_id)}" if base else ""
+
+
+def portal_line(conn, student_id: int) -> str:
+    url = portal_url(conn, student_id)
+    return f"\n查看剩余课时和上课记录：{url}\n" if url else ""
+
+
 def notify_schedule_changed(conn, schedule_id: int):
     lesson = conn.execute(
         """
@@ -135,7 +149,7 @@ def notify_schedule_changed(conn, schedule_id: int):
 def notify_lesson_completed(conn, lesson_instance_id: int, balance_after: int):
     lesson = conn.execute(
         """
-        SELECT st.name AS student_name, st.email AS student_email,
+        SELECT st.id AS student_id, st.name AS student_name, st.email AS student_email,
                t.name AS teacher_name, t.email AS teacher_email, cp.course_name, li.confirmed_at
         FROM lesson_instances li
         JOIN schedules s ON s.id = li.schedule_id
@@ -156,7 +170,7 @@ def notify_lesson_completed(conn, lesson_instance_id: int, balance_after: int):
         f"确认时间：{lesson['confirmed_at']}\n"
         f"剩余课时：{balance_after} 节\n"
     )
-    queue_email(conn, lesson["student_email"], "student", "课程完成通知", body, "lesson_instance", lesson_instance_id)
+    queue_email(conn, lesson["student_email"], "student", "课程完成通知", body + portal_line(conn, lesson["student_id"]), "lesson_instance", lesson_instance_id)
     queue_email(conn, lesson["teacher_email"], "teacher", "课程完成通知", body, "lesson_instance", lesson_instance_id)
 
 
@@ -198,7 +212,7 @@ def notify_low_balance_if_needed(conn, course_package_id: int, balance_after: in
         )
     package = conn.execute(
         """
-        SELECT st.name AS student_name, st.email AS student_email,
+        SELECT st.id AS student_id, st.name AS student_name, st.email AS student_email,
                t.name AS teacher_name, t.email AS teacher_email, cp.course_name
         FROM course_packages cp
         JOIN students st ON st.id = cp.student_id
@@ -218,7 +232,7 @@ def notify_low_balance_if_needed(conn, course_package_id: int, balance_after: in
         f"当前剩余：{balance_after} 节\n\n"
         f"{tail}\n"
     )
-    queue_email(conn, package["student_email"], "student", "课时余额提醒", body, "course_package", course_package_id)
+    queue_email(conn, package["student_email"], "student", "课时余额提醒", body + portal_line(conn, package["student_id"]), "course_package", course_package_id)
     queue_email(conn, package["teacher_email"], "teacher", "课时余额提醒", body, "course_package", course_package_id)
 
 
@@ -254,3 +268,32 @@ def create_reminder_logs(conn, target_weekday: int):
         )
         queue_email(conn, row["student_email"], "student", "明天课程提醒", body, "schedule", row["id"])
         queue_email(conn, row["teacher_email"], "teacher", "明天课程提醒", body, "schedule", row["id"])
+
+
+def notify_renewal_requested(conn, renewal_id: int):
+    """学生在自助页面点了“我要续费”，通知老师和管理员去跟进。"""
+    row = conn.execute(
+        """
+        SELECT rr.balance_at_request, st.name AS student_name, st.phone, st.email AS student_email,
+               t.name AS teacher_name, t.email AS teacher_email, cp.course_name
+        FROM renewal_requests rr
+        JOIN course_packages cp ON cp.id = rr.course_package_id
+        JOIN students st ON st.id = cp.student_id
+        JOIN teachers t ON t.id = cp.teacher_id
+        WHERE rr.id = ?
+        """,
+        (renewal_id,),
+    ).fetchone()
+    if not row:
+        return
+    body = (
+        f"学生提交了续费意向\n\n"
+        f"学生：{row['student_name']}\n"
+        f"课程：{row['course_name']}\n"
+        f"老师：{row['teacher_name']}\n"
+        f"电话：{row['phone'] or '未填写'}\n"
+        f"邮箱：{row['student_email']}\n"
+        f"提交时剩余：{row['balance_at_request']} 节\n\n"
+        f"请在系统的“续费”页面跟进并登记新课时。\n"
+    )
+    queue_email(conn, row["teacher_email"], "teacher", "续费申请", body, "renewal_request", renewal_id)

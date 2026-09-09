@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS course_packages (
     course_name TEXT NOT NULL,
     teacher_id INTEGER NOT NULL,
     purchased_lessons INTEGER NOT NULL CHECK (purchased_lessons >= 0),
-    current_balance INTEGER NOT NULL CHECK (current_balance >= 0),
+    current_balance INTEGER NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
@@ -111,6 +111,17 @@ CREATE TABLE IF NOT EXISTS balance_alerts (
     FOREIGN KEY (course_package_id) REFERENCES course_packages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS renewal_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_package_id INTEGER NOT NULL,
+    balance_at_request INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'handled')),
+    note TEXT,
+    handled_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (course_package_id) REFERENCES course_packages(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -129,9 +140,45 @@ MIGRATIONS = {
 
 
 def migrate_schema(conn):
-    """给已经在跑的旧数据库补上新增字段，不影响已有数据。"""
+    """给已经在跑的旧数据库补上新增字段和约束变更，不影响已有数据。"""
     for table, columns in MIGRATIONS.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         for column, statement in columns.items():
             if column not in existing:
                 conn.execute(statement)
+    drop_balance_check_constraint(conn)
+
+
+def drop_balance_check_constraint(conn):
+    """旧库的 current_balance 有非负约束，允许透支后需要重建表去掉它。"""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'course_packages'").fetchone()
+    if not row or "current_balance INTEGER NOT NULL CHECK" not in row["sql"]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute(
+        """
+        CREATE TABLE course_packages_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            course_name TEXT NOT NULL,
+            teacher_id INTEGER NOT NULL,
+            purchased_lessons INTEGER NOT NULL CHECK (purchased_lessons >= 0),
+            current_balance INTEGER NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+            FOREIGN KEY (teacher_id) REFERENCES teachers(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO course_packages_new
+        (id, student_id, course_name, teacher_id, purchased_lessons, current_balance, active, created_at)
+        SELECT id, student_id, course_name, teacher_id, purchased_lessons, current_balance, active, created_at
+        FROM course_packages
+        """
+    )
+    conn.execute("DROP TABLE course_packages")
+    conn.execute("ALTER TABLE course_packages_new RENAME TO course_packages")
+    conn.execute("PRAGMA foreign_keys = ON")

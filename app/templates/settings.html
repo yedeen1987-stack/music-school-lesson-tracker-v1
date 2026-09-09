@@ -9,6 +9,12 @@
     <label>余额提醒
       <input name="low_balance_thresholds" value="{{ settings_map.get('low_balance_thresholds', '10,7,5,3,1') }}">
     </label>
+    <label>允许透支节数
+      <input name="overdraft_limit_value" type="number" min="0" max="5" value="{{ settings_map.get('overdraft_limit', '1') }}">
+    </label>
+    <label>对外访问地址（学生自助链接用，例如 https://music.yourdomain.com）
+      <input name="public_base_url" value="{{ settings_map.get('public_base_url', '') }}" placeholder="留空则邮件里不带链接">
+    </label>
     <button class="primary">保存设置</button>
   </form>
   <p>邮件账号通过环境变量配置。余额提醒规则：剩余课时跌破任一阈值时提醒一次，续费后重新生效。</p>

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>续费申请</h1>
+<div class="list">
+{% for item in open_requests %}
+  <article class="item">
+    <div class="row"><strong>{{ item.student_name }} · {{ item.course_name }}</strong><span class="status">待处理</span></div>
+    <p>{{ item.teacher_name }} · 提交时剩余 {{ item.balance_at_request }} 节 · 当前剩余 {{ item.current_balance }} 节</p>
+    <p>{{ item.phone or "未填写电话" }} · {{ item.student_email }} · {{ item.created_at }}</p>
+    <div class="actions">
+      <a class="button" href="/students/{{ item.student_id }}">去加课时</a>
+      <form method="post" action="/renewals/{{ item.id }}/handled"><button class="primary">标记已处理</button></form>
+    </div>
+  </article>
+{% else %}
+  <p class="empty">暂无待处理的续费申请</p>
+{% endfor %}
+</div>
+
+{% if handled_requests %}
+<h2 class="subhead">已处理</h2>
+<div class="list">
+{% for item in handled_requests %}
+  <article class="item">
+    <div class="row"><strong>{{ item.student_name }} · {{ item.course_name }}</strong><span>{{ item.handled_at }}</span></div>
+    <p>{{ item.teacher_name }} · 提交时剩余 {{ item.balance_at_request }} 节</p>
+  </article>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}
