@@ -33,13 +33,15 @@ sudo -u music .venv/bin/pip install -r requirements.txt
 ```bash
 sudo cp /opt/music-school/.env.example /etc/music-school.env
 sudo nano /etc/music-school.env
-sudo chmod 600 /etc/music-school.env
+sudo chown root:music /etc/music-school.env
+sudo chmod 640 /etc/music-school.env
 ```
 
-必须修改的两项：
+首次部署配置（已有生产秘密保持不变）：
 
 - `SESSION_SECRET`：用 `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` 生成。仓库里的默认值是公开的，不改等于任何人都能伪造登录 Cookie。
-- `SMTP_*`：建议用 Resend / Brevo / SendGrid 的 SMTP 并配好域名 DKIM/SPF，个人邮箱群发容易进垃圾箱或被限流。
+- `SMTP_*`：可暂不配置；未配置时邮件记录标记为 `disabled`，不会投递邮件。
+- 生产设置：`DATABASE_URL=/var/lib/music-school/music_school.sqlite3`、`TZ=America/Sao_Paulo`、`COOKIE_SECURE=1`、`EMAIL_WORKER_ENABLED=0`。
 
 `TZ` 按机构所在时区填写，它决定“今日课程”和完成确认时间。
 
@@ -65,7 +67,13 @@ sudo systemctl daemon-reload
 sudo systemctl restart music-school-reminders.timer
 ```
 
-## 五、Nginx 和 HTTPS
+## 五、Cloudflare Tunnel 和 HTTPS
+
+当前生产入口：公网域名 → Cloudflare Tunnel → `http://127.0.0.1:8100`。将 cloudflared 注册为开机启动服务；通过服务器安全凭据流程配置，不把 token、环境文件或密码复制到聊天、Git 或日志。不开放公网 8100，不改动 Portainer 的 8000/9443。
+
+`COOKIE_SECURE=1` 时正式登录验收必须使用 HTTPS；本机 HTTP GET 只验证跳转和页面可达性。
+
+### 可选替代：Nginx 和 HTTPS
 
 ```bash
 sudo cp /opt/music-school/deploy/nginx.conf /etc/nginx/sites-available/music-school
@@ -76,11 +84,11 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d music.yourdomain.com
 ```
 
-应用只监听 `127.0.0.1:8000`，外网一律走 Nginx。
+应用只监听 `127.0.0.1:8100`，外网一律走 Nginx。
 
 ## 六、上线后立刻要做的事
 
-1. 用 `admin / admin123` 登录，右上角“改密码”立刻改掉默认密码；两位老师账号 `wang` / `li`（默认 `teacher123`）同样各自改一次。
+1. 使用已创建的管理员账号登录（当前生产账号为 `admin1`）。`init_db.py` 只初始化结构；生产环境禁止运行 `seed_data`，不要重建已有管理员或修改其密码。
 2. 在“基础设置”里确认提醒阈值（例如 `10,7,5,3,1`）、允许透支节数，并填写“对外访问地址”，例如 `https://music.yourdomain.com`，否则学生邮件里不会带自助链接。
 3. 发一节测试课，去“基础设置 → 邮件记录”确认状态从 `pending` 变成 `sent`。
 
@@ -120,12 +128,12 @@ sudo systemctl restart music-school
 
 ## 数据备份和恢复
 
-`music-school-backup.timer` 每天 03:30 用 SQLite 在线备份写入 `/var/lib/music-school/backups/`，默认保留 30 份（`BACKUP_KEEP`）。每份本地备份生成后都会执行 SQLite `PRAGMA integrity_check`，只有校验通过才继续后续备份流程。
+`music-school-backup.timer` 每天圣保罗时间 03:30（timer 显式指定时区）用 SQLite 在线备份写入 `/var/lib/music-school/backups/`，默认保留 30 份（`BACKUP_KEEP`）。每份本地备份生成后都会执行 SQLite `PRAGMA integrity_check`，只有校验通过才继续后续备份流程。
 
 手动备份：
 
 ```bash
-sudo -u music /opt/music-school/.venv/bin/python /opt/music-school/scripts/backup_sqlite.py
+sudo systemctl start music-school-backup.service
 ```
 
 恢复：停止服务，用备份文件覆盖数据库，再启动。
@@ -196,3 +204,7 @@ sudo journalctl -u music-school-reminders -n 50 --no-pager
 ## 其他平台
 
 仓库仍保留 `Procfile` 和 `render.yaml`，可用于 Render 等平台。注意这类平台若没有持久化磁盘，SQLite 数据会在重新部署后丢失，所以推荐自建服务器。
+
+### 生产 NAS 挂载依赖
+
+备份 service 使用 `RequiresMountsFor=/mnt/ugreen`，需要在系统挂载配置中持久配置 NAS。服务以 `music:music` 运行，继承 music 的 supplementary groups，使用 `UMask=0077` 创建本地备份。NAS 的权限仍由 CIFS 挂载及服务端控制。启用 timer 前先手动启动 backup service，确认本地和 NAS 两份备份校验通过。

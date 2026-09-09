@@ -2,7 +2,7 @@
 Description=每天凌晨备份数据库
 
 [Timer]
-OnCalendar=*-*-* 03:30:00
+OnCalendar=*-*-* 03:30:00 America/Sao_Paulo
 Persistent=true
 
 [Install]
