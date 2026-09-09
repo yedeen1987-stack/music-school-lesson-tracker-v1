@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import time
 from datetime import date
@@ -14,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.database import db_session
-from app.emailer import process_email_queue
+from app.emailer import process_email_queue, email_queue_summary
 from app.models import SCHEMA_SQL
 from app.security import read_session, read_student_token, sign_session
 from app.services import (
@@ -120,6 +121,7 @@ def today(request: Request, error: str = "", user=Depends(get_user)):
                 "today": date.today(),
                 "overdraft": overdraft_limit(conn),
                 "pending_renewals": pending_renewals,
+                "email_summary": email_queue_summary(conn),
                 "error": error,
             },
         )
@@ -311,7 +313,7 @@ def settings(request: Request, user=Depends(get_user)):
         settings_rows = conn.execute("SELECT * FROM settings").fetchall()
         settings_map = {row["key"]: row["value"] for row in settings_rows}
         logs = conn.execute("SELECT * FROM email_logs ORDER BY id DESC LIMIT 50").fetchall()
-        return render(request, "settings.html", {"user": user, "settings": settings_rows, "settings_map": settings_map, "logs": logs})
+        return render(request, "settings.html", {"user": user, "settings": settings_rows, "settings_map": settings_map, "logs": logs, "email_summary": email_queue_summary(conn)})
 
 
 @app.post("/settings")
@@ -324,6 +326,8 @@ def save_settings(
 ):
     if user["role"] != "admin":
         raise HTTPException(403)
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', reminder_time):
+        raise HTTPException(422, '提醒时间必须是 HH:MM（00:00–23:59）')
     with db_session() as conn:
         update_setting(conn, "reminder_time", reminder_time)
         update_setting(conn, "low_balance_thresholds", low_balance_thresholds)

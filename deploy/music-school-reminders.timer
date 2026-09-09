@@ -2,8 +2,9 @@
 Description=每天定时把明天的课程提醒放进邮件队列
 
 [Timer]
-# 与“基础设置”里的提醒时间保持一致，改了记得同步这里
-OnCalendar=*-*-* 19:00:00
+# 每分钟检查基础设置中的提醒时间（使用服务 TZ），同日只入队一次
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
 Persistent=true
 
 [Install]

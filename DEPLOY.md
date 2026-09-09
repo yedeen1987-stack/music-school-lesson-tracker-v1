@@ -55,7 +55,15 @@ sudo systemctl enable --now music-school-backup.timer
 systemctl list-timers | grep music-school
 ```
 
-`music-school-reminders.timer` 默认每天 19:00 执行，要和“基础设置”里的提醒时间保持一致；改时间时同时改这个 timer。
+`music-school-reminders.timer` 每分钟触发检查。脚本按 `/etc/music-school.env` 的 `TZ` 读取“基础设置”中的提醒时间（默认 19:00，支持分钟），仅在对应分钟将明天的课程入队。当天只入队一次，已执行后再修改时间也不重复；错过该分钟不补发。实际投递由邮件队列完成，可能稍晚于设置时间。日常调时间只需改网页。
+
+已有部署升级时重新复制 timer 并重启，否则旧的每日定时器仍会生效：
+
+```bash
+sudo cp /opt/music-school/deploy/music-school-reminders.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart music-school-reminders.timer
+```
 
 ## 五、Nginx 和 HTTPS
 
@@ -128,7 +136,36 @@ sudo -u music cp /var/lib/music-school/backups/music_school_YYYYmmdd_HHMMSS.sqli
 sudo systemctl start music-school
 ```
 
-强烈建议再把备份目录同步到另一台机器或对象存储，服务器本机的备份挡不住磁盘损坏。
+### 可选异地备份（rclone）
+
+在服务器安装 rclone，用服务账号 `music` 配置远端存储凭据，随后在 `/etc/music-school.env` 中设置：
+
+```text
+BACKUP_RCLONE_REMOTE=school-remote:music-school/backups
+RCLONE_CONFIG=/var/lib/music-school/rclone.conf
+```
+
+`school-remote` 是 `rclone config --config /var/lib/music-school/rclone.conf` 中创建的远端名。配置文件须由 `music` 可读（建议权限 600），凭据不要提交仓库。负责人需选择存储服务、开通账号并配置凭据。未设置 `BACKUP_RCLONE_REMOTE` 时保持仅本地备份；配置后本地在线备份先落盘，再用 `rclone copy` 上传本次文件，最长等待 300 秒。上传失败、rclone 未安装或超时都会输出明确错误，本地备份保留且任务不会因上传失败退出。`BACKUP_KEEP` 仅清理本地，远端保留策略需在存储端单独配置。
+
+验证（systemd 自动加载环境文件）：
+
+```bash
+sudo systemctl start music-school-backup.service
+sudo journalctl -u music-school-backup.service -n 50 --no-pager
+sudo -u music rclone --config /var/lib/music-school/rclone.conf ls school-remote:music-school/backups
+```
+
+确认日志上传成功并在远端看到本次文件后，下载该文件到临时目录进行恢复演练，不能覆盖生产数据库：
+
+```bash
+sudo -u music mkdir -p /var/lib/music-school/restore-drill
+sudo -u music rclone --config /var/lib/music-school/rclone.conf copyto school-remote:music-school/backups/music_school_YYYYmmdd_HHMMSS.sqlite3 /var/lib/music-school/restore-drill/restored.sqlite3
+sudo -u music sqlite3 /var/lib/music-school/restore-drill/restored.sqlite3 'PRAGMA integrity_check;'
+cd /opt/music-school
+sudo -u music env DATABASE_URL=/var/lib/music-school/restore-drill/restored.sqlite3 EMAIL_WORKER_ENABLED=0 TZ=America/Sao_Paulo /opt/music-school/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+如未安装 sqlite3 命令行工具，先安装。完整性检查应返回 `ok`。通过 SSH 隧道访问临时服务，使用备份中的管理员账号核对学生数、课时余额及近期上课记录；核对完按 Ctrl+C 停止临时服务。记录远端文件名、检查结果和核对日期。此演练需要负责人在实际服务器执行，自动测试不代表远端验收完成。
 
 ## 常见排查
 
