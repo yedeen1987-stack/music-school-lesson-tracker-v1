@@ -1,0 +1,10 @@
+[Unit]
+Description=Music School - 明天课程提醒入队
+
+[Service]
+Type=oneshot
+User=music
+Group=music
+WorkingDirectory=/opt/music-school
+EnvironmentFile=/etc/music-school.env
+ExecStart=/opt/music-school/.venv/bin/python scripts/send_reminders.py

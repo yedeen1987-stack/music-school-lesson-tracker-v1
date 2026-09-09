@@ -1,0 +1,9 @@
+[Unit]
+Description=每 5 分钟兜底处理一次邮件队列（防止应用重启时漏发）
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

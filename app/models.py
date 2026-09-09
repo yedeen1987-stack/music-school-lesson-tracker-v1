@@ -97,7 +97,18 @@ CREATE TABLE IF NOT EXISTS email_logs (
     error TEXT,
     related_type TEXT,
     related_id INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_attempt_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS balance_alerts (
+    course_package_id INTEGER NOT NULL,
+    threshold INTEGER NOT NULL,
+    notified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (course_package_id, threshold),
+    FOREIGN KEY (course_package_id) REFERENCES course_packages(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -106,3 +117,21 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
+
+
+MIGRATIONS = {
+    "email_logs": {
+        "attempts": "ALTER TABLE email_logs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        "next_attempt_at": "ALTER TABLE email_logs ADD COLUMN next_attempt_at TEXT",
+        "last_attempt_at": "ALTER TABLE email_logs ADD COLUMN last_attempt_at TEXT",
+    },
+}
+
+
+def migrate_schema(conn):
+    """给已经在跑的旧数据库补上新增字段，不影响已有数据。"""
+    for table, columns in MIGRATIONS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column, statement in columns.items():
+            if column not in existing:
+                conn.execute(statement)

@@ -1,0 +1,10 @@
+[Unit]
+Description=每天定时把明天的课程提醒放进邮件队列
+
+[Timer]
+# 与“基础设置”里的提醒时间保持一致，改了记得同步这里
+OnCalendar=*-*-* 19:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

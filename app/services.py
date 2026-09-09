@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from app.emailer import notify_lesson_completed, notify_low_balance_if_needed, notify_schedule_changed
+from app.models import migrate_schema
+
+from app.emailer import (
+    notify_lesson_completed,
+    notify_low_balance_if_needed,
+    notify_schedule_changed,
+    reset_balance_alerts,
+)
 
 
 def init_schema(conn, schema_sql: str):
     conn.executescript(schema_sql)
+    migrate_schema(conn)
 
 
 def seed_data(conn):
@@ -75,6 +83,7 @@ def add_course_package(conn, student_id, course_name, teacher_id, purchased_less
             "INSERT INTO lesson_transactions (course_package_id, delta_lessons, reason) VALUES (?, ?, 'purchase')",
             (existing["id"], purchased_lessons),
         )
+        reset_balance_alerts(conn, existing["id"], existing["current_balance"] + purchased_lessons)
         return existing["id"]
     cur = conn.execute(
         """
@@ -88,6 +97,7 @@ def add_course_package(conn, student_id, course_name, teacher_id, purchased_less
         "INSERT INTO lesson_transactions (course_package_id, delta_lessons, reason) VALUES (?, ?, 'purchase')",
         (package_id, purchased_lessons),
     )
+    reset_balance_alerts(conn, package_id, purchased_lessons)
     return package_id
 
 
@@ -229,3 +239,5 @@ def undo_last_record(conn, user, record_id):
         "INSERT INTO lesson_transactions (course_package_id, lesson_record_id, delta_lessons, reason) VALUES (?, ?, ?, ?)",
         (record["course_package_id"], cur.lastrowid, reverse_delta, reverse_action),
     )
+    if reverse_delta > 0:
+        reset_balance_alerts(conn, record["course_package_id"], new_balance)

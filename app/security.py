@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+
 from itsdangerous import BadSignature, URLSafeSerializer
 
-SECRET_KEY = "local-dev-change-me"
+# 生产环境务必通过 SESSION_SECRET 覆盖，否则任何人都能用仓库里的默认值伪造登录 Cookie。
+SECRET_KEY = os.getenv("SESSION_SECRET", "local-dev-change-me")
 serializer = URLSafeSerializer(SECRET_KEY, salt="music-school-session")
 
 

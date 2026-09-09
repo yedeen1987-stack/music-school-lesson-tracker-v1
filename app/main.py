@@ -1,3 +1,6 @@
+import os
+import threading
+import time
 from datetime import date
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -6,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.database import db_session
+from app.emailer import process_email_queue
 from app.models import SCHEMA_SQL
 from app.security import read_session, sign_session
 from app.services import (
@@ -28,12 +32,28 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+EMAIL_WORKER_INTERVAL = int(os.getenv("EMAIL_WORKER_INTERVAL", "20"))
+
+
+def email_worker_loop():
+    """后台线程按固定间隔发送邮件队列，页面请求不再等待 SMTP。"""
+    while True:
+        try:
+            with db_session() as conn:
+                process_email_queue(conn)
+        except Exception:
+            pass
+        time.sleep(EMAIL_WORKER_INTERVAL)
+
+
 @app.on_event("startup")
 def startup():
     with db_session() as conn:
         init_schema(conn, SCHEMA_SQL)
         seed_data(conn)
         ensure_default_settings(conn)
+    if os.getenv("EMAIL_WORKER_ENABLED", "1") == "1":
+        threading.Thread(target=email_worker_loop, daemon=True).start()
 
 
 def get_user(request: Request):
