@@ -10,7 +10,7 @@ Group=music
 WorkingDirectory=/opt/music-school
 EnvironmentFile=/etc/music-school.env
 ExecStartPre=/opt/music-school/.venv/bin/python scripts/init_db.py
-ExecStart=/opt/music-school/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/music-school/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100
 Restart=always
 RestartSec=5
 
