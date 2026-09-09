@@ -1,0 +1,9 @@
+name = "music-school-lesson-tracker-v1"
+main = "src/worker.js"
+compatibility_date = "2026-09-08"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "music_school_lesson_tracker_v1"
+database_id = "local-preview"
+

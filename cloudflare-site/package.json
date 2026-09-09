@@ -1,0 +1,15 @@
+{
+  "name": "music-school-cloudflare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev src/worker.js --local --persist-to .wrangler/state",
+    "build": "mkdir -p dist/server && cp src/worker.js dist/server/index.js && cp -R .openai dist/.openai",
+    "deploy:cf": "wrangler deploy src/worker.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.54.0"
+  }
+}
+

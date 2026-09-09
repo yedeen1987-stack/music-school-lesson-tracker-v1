@@ -123,3 +123,18 @@ def test_balances_are_per_course_package(conn):
     assert piano_id != guitar_id
     assert conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (piano_id,)).fetchone()[0] == 5
     assert conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (guitar_id,)).fetchone()[0] == 3
+
+
+def test_same_student_course_and_teacher_purchase_merges_into_existing_package(conn):
+    from app.services import add_course_package
+
+    teacher_id = conn.execute("SELECT id FROM teachers WHERE name = '王老师'").fetchone()[0]
+    student_id = create_student(conn, "Bea", "", "bea@example.com", "钢琴", teacher_id, 10, 0, "10:00")
+    package_id = conn.execute("SELECT id FROM course_packages WHERE student_id = ?", (student_id,)).fetchone()[0]
+    merged_id = add_course_package(conn, student_id, "钢琴", teacher_id, 2)
+    row = conn.execute("SELECT purchased_lessons, current_balance FROM course_packages WHERE id = ?", (package_id,)).fetchone()
+    count = conn.execute("SELECT COUNT(*) FROM course_packages WHERE student_id = ?", (student_id,)).fetchone()[0]
+    assert merged_id == package_id
+    assert count == 1
+    assert row["purchased_lessons"] == 12
+    assert row["current_balance"] == 12

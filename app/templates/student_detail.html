@@ -10,12 +10,12 @@
 {% for package in packages %}
   <article class="item">
     <h2>{{ package.course_name }}</h2>
-    <p>{{ package.teacher_name }} · 购买 {{ package.purchased_lessons }} 节 · 剩余 {{ package.current_balance }} 节</p>
+    <p>{{ package.teacher_name }} · 累计购买 {{ package.purchased_lessons }} 节 · 剩余 {{ package.current_balance }} 节</p>
   </article>
 {% endfor %}
 </div>
 {% if user.role == "admin" %}
-<h2 class="subhead">增加课时包</h2>
+<h2 class="subhead">续费课时</h2>
 <form method="post" action="/students/{{ student.id }}/packages" class="form">
   <label>课程<input name="course_name" required></label>
   <label>老师<select name="teacher_id">{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}</select></label>
@@ -24,4 +24,3 @@
 </form>
 {% endif %}
 {% endblock %}
-

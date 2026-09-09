@@ -52,6 +52,30 @@ def create_student(conn, name, phone, email, course_name, teacher_id, purchased_
 
 
 def add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons):
+    existing = conn.execute(
+        """
+        SELECT id, purchased_lessons, current_balance
+        FROM course_packages
+        WHERE student_id = ? AND course_name = ? AND teacher_id = ? AND active = 1
+        ORDER BY id
+        LIMIT 1
+        """,
+        (student_id, course_name, teacher_id),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE course_packages SET purchased_lessons = ?, current_balance = ? WHERE id = ?",
+            (
+                existing["purchased_lessons"] + purchased_lessons,
+                existing["current_balance"] + purchased_lessons,
+                existing["id"],
+            ),
+        )
+        conn.execute(
+            "INSERT INTO lesson_transactions (course_package_id, delta_lessons, reason) VALUES (?, ?, 'purchase')",
+            (existing["id"], purchased_lessons),
+        )
+        return existing["id"]
     cur = conn.execute(
         """
         INSERT INTO course_packages (student_id, course_name, teacher_id, purchased_lessons, current_balance)

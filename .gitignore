@@ -9,3 +9,4 @@ data/backups/
 
 .env
 work/
+cloudflare-site/.git-sites-backup/
