@@ -40,9 +40,11 @@ def copy_backup_to_nas(target):
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     destination = destination_dir / Path(target).name
-    shutil.copy2(target, destination)
+    # CIFS may allow writing content but reject preserving timestamps or modes.
+    shutil.copyfile(target, destination)
 
     verify_backup(destination)
+    print(f"NAS 备份完成，integrity_check=ok：{destination}")
 
     return destination
 
@@ -79,7 +81,7 @@ def main():
     backups = sorted(backup_dir.glob("music_school_*.sqlite3"))
     for old in backups[:-keep]:
         old.unlink()
-    print(f"备份完成：{target}")
+    print(f"备份完成，integrity_check=ok：{target}")
     copy_backup_to_nas(target)
     upload_backup(target)
     return target

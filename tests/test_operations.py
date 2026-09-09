@@ -337,3 +337,26 @@ def test_nas_backup_skips_when_not_configured(tmp_path, monkeypatch):
     result = backup_sqlite.copy_backup_to_nas(target)
 
     assert result is None
+
+
+def test_nas_backup_succeeds_when_metadata_changes_are_denied(tmp_path, monkeypatch):
+    target = tmp_path / 'backup.sqlite3'
+    with sqlite3.connect(target) as conn:
+        conn.execute('CREATE TABLE sample (value TEXT)')
+        conn.execute("INSERT INTO sample VALUES ('preserved')")
+    nas_dir = tmp_path / 'nas' / 'backups'
+    monkeypatch.setenv('BACKUP_NAS_MOUNT', str(tmp_path / 'nas'))
+    monkeypatch.setenv('BACKUP_NAS_DIR', str(nas_dir))
+    monkeypatch.setattr(backup_sqlite.os.path, 'ismount', lambda path: True)
+
+    def deny_metadata(*args, **kwargs):
+        raise PermissionError('CIFS does not permit metadata changes')
+
+    monkeypatch.setattr(backup_sqlite.os, 'utime', deny_metadata)
+    monkeypatch.setattr(backup_sqlite.os, 'chmod', deny_metadata)
+    copied = backup_sqlite.copy_backup_to_nas(target)
+    assert copied == nas_dir / target.name
+    assert copied.read_bytes() == target.read_bytes()
+    with sqlite3.connect(copied) as conn:
+        assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        assert conn.execute('SELECT value FROM sample').fetchone()[0] == 'preserved'
