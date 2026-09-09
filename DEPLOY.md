@@ -120,7 +120,7 @@ sudo systemctl restart music-school
 
 ## 数据备份和恢复
 
-`music-school-backup.timer` 每天 03:30 用 SQLite 在线备份写入 `/var/lib/music-school/backups/`，默认保留 30 份（`BACKUP_KEEP`）。
+`music-school-backup.timer` 每天 03:30 用 SQLite 在线备份写入 `/var/lib/music-school/backups/`，默认保留 30 份（`BACKUP_KEEP`）。每份本地备份生成后都会执行 SQLite `PRAGMA integrity_check`，只有校验通过才继续后续备份流程。
 
 手动备份：
 
@@ -135,6 +135,22 @@ sudo systemctl stop music-school
 sudo -u music cp /var/lib/music-school/backups/music_school_YYYYmmdd_HHMMSS.sqlite3 /var/lib/music-school/music_school.sqlite3
 sudo systemctl start music-school
 ```
+
+
+### UGREEN NAS 第二份备份
+
+生产数据库和第一份备份必须保留在 Ubuntu 本地文件系统，不要把正在使用的 SQLite 数据库直接放到 SMB/CIFS NAS。
+
+在 `/etc/music-school.env` 中设置：
+
+```text
+BACKUP_NAS_MOUNT=/mnt/ugreen
+BACKUP_NAS_DIR=/mnt/ugreen/server-backups/music-school
+```
+
+备份脚本会先确认 NAS 是真实挂载点，再复制本地备份，并对 NAS 副本再次执行 SQLite 完整性检查。NAS 未挂载时任务会明确失败，避免误写 Ubuntu 本机的 `/mnt/ugreen` 目录。
+
+正式启用前，必须实际确认 systemd 服务账号 `music` 对 NAS 目标目录具有写权限。
 
 ### 可选异地备份（rclone）
 

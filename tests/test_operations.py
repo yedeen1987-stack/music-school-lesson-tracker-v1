@@ -196,3 +196,144 @@ def test_each_day_is_judged_independently_after_a_catch_up(conn):
     assert not run_reminders(conn, datetime(2026, 9, 13, 18, 0))  # 另一天未到时间
     assert run_reminders(conn, datetime(2026, 9, 13, 19, 0))  # 另一天按时发送
     assert conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0] > first_day
+
+
+
+def test_verify_backup_accepts_valid_sqlite(tmp_path):
+    target = tmp_path / 'valid.sqlite3'
+    with sqlite3.connect(target) as db:
+        db.execute('CREATE TABLE sample (value TEXT)')
+        db.execute("INSERT INTO sample VALUES ('verified backup')")
+
+    backup_sqlite.verify_backup(target)
+
+
+def test_verify_backup_rejects_corrupt_file(tmp_path):
+    target = tmp_path / 'corrupt.sqlite3'
+    target.write_bytes(b'not a sqlite database')
+
+    with pytest.raises((sqlite3.DatabaseError, RuntimeError)):
+        backup_sqlite.verify_backup(target)
+
+
+def test_backup_main_verifies_created_backup(tmp_path, monkeypatch):
+    source = tmp_path / 'source.sqlite3'
+    with sqlite3.connect(source) as db:
+        db.execute('CREATE TABLE sample (value TEXT)')
+        db.execute("INSERT INTO sample VALUES ('lesson balance')")
+
+    monkeypatch.setenv('DATABASE_URL', str(source))
+    monkeypatch.setenv('BACKUP_DIR', str(tmp_path / 'backups'))
+    monkeypatch.delenv('BACKUP_RCLONE_REMOTE', raising=False)
+
+    checked = []
+
+    def verify(target):
+        checked.append(target)
+
+    monkeypatch.setattr(backup_sqlite, 'verify_backup', verify)
+
+    target = backup_sqlite.main()
+
+    assert checked == [target]
+
+
+def test_nas_backup_refuses_unmounted_destination(tmp_path, monkeypatch):
+    target = tmp_path / 'backup.sqlite3'
+    target.write_bytes(b'backup')
+
+    nas_mount = tmp_path / 'fake-nas'
+    nas_dir = nas_mount / 'server-backups' / 'music-school'
+
+    monkeypatch.setenv('BACKUP_NAS_MOUNT', str(nas_mount))
+    monkeypatch.setenv('BACKUP_NAS_DIR', str(nas_dir))
+    monkeypatch.setattr(backup_sqlite.os.path, 'ismount', lambda path: False)
+
+    with pytest.raises(RuntimeError, match='NAS'):
+        backup_sqlite.copy_backup_to_nas(target)
+
+    assert not nas_dir.exists()
+
+
+def test_nas_backup_copies_file_when_mounted(tmp_path, monkeypatch):
+    target = tmp_path / 'music_school_test.sqlite3'
+    with sqlite3.connect(target) as db:
+        db.execute('CREATE TABLE sample (value TEXT)')
+        db.execute("INSERT INTO sample VALUES ('nas backup')")
+
+    nas_mount = tmp_path / 'nas'
+    nas_mount.mkdir()
+    nas_dir = nas_mount / 'server-backups' / 'music-school'
+
+    monkeypatch.setenv('BACKUP_NAS_MOUNT', str(nas_mount))
+    monkeypatch.setenv('BACKUP_NAS_DIR', str(nas_dir))
+    monkeypatch.setattr(backup_sqlite.os.path, 'ismount', lambda path: True)
+
+    copied = backup_sqlite.copy_backup_to_nas(target)
+
+    expected = nas_dir / target.name
+    assert copied == expected
+    assert expected.read_bytes() == target.read_bytes()
+
+
+def test_nas_backup_verifies_copied_file(tmp_path, monkeypatch):
+    target = tmp_path / 'music_school_test.sqlite3'
+    target.write_bytes(b'backup content')
+
+    nas_mount = tmp_path / 'nas'
+    nas_mount.mkdir()
+    nas_dir = nas_mount / 'server-backups' / 'music-school'
+
+    monkeypatch.setenv('BACKUP_NAS_MOUNT', str(nas_mount))
+    monkeypatch.setenv('BACKUP_NAS_DIR', str(nas_dir))
+    monkeypatch.setattr(backup_sqlite.os.path, 'ismount', lambda path: True)
+
+    checked = []
+
+    def verify(path):
+        checked.append(path)
+
+    monkeypatch.setattr(backup_sqlite, 'verify_backup', verify)
+
+    copied = backup_sqlite.copy_backup_to_nas(target)
+
+    assert checked == [copied]
+
+
+def test_backup_main_calls_nas_copy(tmp_path, monkeypatch):
+    source = tmp_path / 'source.sqlite3'
+    with sqlite3.connect(source) as db:
+        db.execute('CREATE TABLE sample (value TEXT)')
+        db.execute("INSERT INTO sample VALUES ('daily backup')")
+
+    monkeypatch.setenv('DATABASE_URL', str(source))
+    monkeypatch.setenv('BACKUP_DIR', str(tmp_path / 'backups'))
+    monkeypatch.delenv('BACKUP_RCLONE_REMOTE', raising=False)
+
+    copied = []
+
+    def copy_to_nas(target):
+        copied.append(target)
+
+    monkeypatch.setattr(backup_sqlite, 'copy_backup_to_nas', copy_to_nas)
+
+    target = backup_sqlite.main()
+
+    assert copied == [target]
+
+
+def test_nas_backup_skips_when_not_configured(tmp_path, monkeypatch):
+    target = tmp_path / 'backup.sqlite3'
+    target.write_bytes(b'backup')
+
+    monkeypatch.delenv('BACKUP_NAS_MOUNT', raising=False)
+    monkeypatch.delenv('BACKUP_NAS_DIR', raising=False)
+    monkeypatch.setattr(
+        backup_sqlite.os.path,
+        'ismount',
+        lambda path: pytest.fail('mount check should not run'),
+    )
+
+    result = backup_sqlite.copy_backup_to_nas(target)
+
+    assert result is None

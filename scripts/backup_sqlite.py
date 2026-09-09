@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 import sqlite3
+import shutil
 import sys
 import subprocess
 import logging
@@ -11,6 +12,39 @@ import logging
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import get_db_path
+
+
+
+def verify_backup(target):
+    """确认备份文件是完整可读取的 SQLite 数据库。"""
+    with sqlite3.connect(target) as conn:
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+    if not result or result[0] != "ok":
+        raise RuntimeError(f"SQLite 备份完整性检查失败：{target}")
+    return True
+
+
+
+def copy_backup_to_nas(target):
+    """仅在 NAS 挂载点真实存在时允许进入 NAS 备份流程。"""
+    nas_mount = os.getenv("BACKUP_NAS_MOUNT", "").strip()
+    nas_dir = os.getenv("BACKUP_NAS_DIR", "").strip()
+
+    if not nas_mount or not nas_dir:
+        return None
+
+    if not os.path.ismount(nas_mount):
+        raise RuntimeError(f"NAS 未挂载：{nas_mount}")
+
+    destination_dir = Path(nas_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    destination = destination_dir / Path(target).name
+    shutil.copy2(target, destination)
+
+    verify_backup(destination)
+
+    return destination
 
 
 def upload_backup(target):
@@ -39,11 +73,14 @@ def main():
     finally:
         destination.close()
         source.close()
+
+    verify_backup(target)
     keep = int(os.getenv("BACKUP_KEEP", "30"))
     backups = sorted(backup_dir.glob("music_school_*.sqlite3"))
     for old in backups[:-keep]:
         old.unlink()
     print(f"备份完成：{target}")
+    copy_backup_to_nas(target)
     upload_backup(target)
     return target
 
