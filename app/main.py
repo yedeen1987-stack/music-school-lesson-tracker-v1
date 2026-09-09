@@ -34,7 +34,6 @@ from app.services import (
     init_schema,
     list_today_lessons,
     record_lesson,
-    seed_data,
     undo_last_record,
     update_setting,
     update_schedule,
@@ -68,7 +67,6 @@ def email_worker_loop():
 def startup():
     with db_session() as conn:
         init_schema(conn, SCHEMA_SQL)
-        seed_data(conn)
         ensure_default_settings(conn)
     if os.getenv("EMAIL_WORKER_ENABLED", "1") == "1":
         threading.Thread(target=email_worker_loop, daemon=True).start()
