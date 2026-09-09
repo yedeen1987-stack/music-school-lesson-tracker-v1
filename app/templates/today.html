@@ -9,6 +9,11 @@
 </section>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if email_summary.failed %}
+<p class="error" role="alert">过去 24 小时有 {{ email_summary.failed }} 封邮件发送失败。
+{% if user.role == 'admin' %}<a href="/settings">查看邮件状态和错误</a>{% else %}请联系管理员检查邮件配置。{% endif %}
+</p>
+{% endif %}
 {% if pending_renewals %}<p class="pill"><a href="/renewals">{{ pending_renewals }} 条续费申请待处理</a></p>{% endif %}
 
 <div class="list">

@@ -1,10 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>基础设置</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<div class="panel" role="status">
+  <p>待发送 {{ email_summary.pending }} 封 · <span class="{{ 'error' if email_summary.failed else '' }}">24 小时内失败 {{ email_summary.failed }} 封</span> · 最近一次成功发送：{{ email_summary.last_success or '暂无成功记录' }}（服务器时间）</p>
+  {% if email_summary.failed %}<p class="error">最近错误：{{ email_summary.error or '未记录错误详情' }}</p>{% endif %}
+</div>
 <div class="panel">
   <form method="post" action="/settings" class="form">
     <label>课前一天提醒时间
-      <input name="reminder_time" type="time" value="{{ settings_map.get('reminder_time', '19:00') }}">
+      <input name="reminder_time" type="time" required value="{{ settings_map.get('reminder_time', '19:00') }}">
+      <small>按服务器时区，每天只入队一次；服务器错过该时间会在恢复后补发；已执行当天修改时间不会再次发送。</small>
     </label>
     <label>余额提醒
       <input name="low_balance_thresholds" value="{{ settings_map.get('low_balance_thresholds', '10,7,5,3,1') }}">

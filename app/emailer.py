@@ -16,6 +16,20 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def email_queue_summary(conn, now=None):
+    now = now or datetime.now()
+    bounds = ((now - timedelta(hours=24)).isoformat(timespec='seconds'), now.isoformat(timespec='seconds'))
+    pending = conn.execute("SELECT COUNT(*) FROM email_logs WHERE status = 'pending'").fetchone()[0]
+    failed = conn.execute(
+        "SELECT COUNT(*) FROM email_logs WHERE status = 'failed' AND last_attempt_at BETWEEN ? AND ?", bounds
+    ).fetchone()[0]
+    latest = conn.execute("SELECT MAX(last_attempt_at) FROM email_logs WHERE status = 'sent'").fetchone()[0]
+    error = conn.execute(
+        "SELECT error FROM email_logs WHERE status = 'failed' AND last_attempt_at BETWEEN ? AND ? ORDER BY last_attempt_at DESC, id DESC LIMIT 1", bounds
+    ).fetchone()
+    return {'pending': pending, 'failed': failed, 'last_success': latest, 'error': error[0] if error else None}
+
+
 def smtp_config():
     host = os.getenv("SMTP_HOST")
     username = os.getenv("SMTP_USERNAME")
