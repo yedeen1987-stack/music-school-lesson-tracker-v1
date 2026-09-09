@@ -68,7 +68,7 @@ def startup():
     with db_session() as conn:
         init_schema(conn, SCHEMA_SQL)
         ensure_default_settings(conn)
-    if os.getenv("EMAIL_WORKER_ENABLED", "1") == "1":
+    if os.getenv("EMAIL_WORKER_ENABLED", "0") == "1":
         threading.Thread(target=email_worker_loop, daemon=True).start()
 
 

@@ -100,9 +100,9 @@ sudo systemctl restart music-school
 ## 邮件是怎么发出去的
 
 - 老师点“完成本节”时，通知只写进 `email_logs`，状态 `pending`，页面立刻返回，不等待 SMTP。
-- 应用内后台线程默认每 20 秒处理一次队列（`EMAIL_WORKER_INTERVAL`）。
+- 生产环境由 `music-school-email-queue.timer` 每 5 分钟调用 `scripts/process_email_queue.py`，作为唯一邮件队列消费者。
+- 应用内后台线程默认关闭；仅在开发或明确不启用 systemd timer 的环境中，才设置 `EMAIL_WORKER_ENABLED=1`。
 - 发送失败按 1 分钟、5 分钟、15 分钟退避重试，共 4 次；仍然失败才标记 `failed`。
-- `music-school-email-queue.timer` 每 5 分钟兜底跑一次，防止应用重启时漏发。
 - 没有配置 SMTP 时不会真的发信，记录会标记为 `disabled`，方便本地验证流程。
 
 ## 学生自助续费
