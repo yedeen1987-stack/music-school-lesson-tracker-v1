@@ -8,6 +8,9 @@
   <span class="pill">{{ "管理员" if user.role == "admin" else "老师" }}</span>
 </section>
 
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if pending_renewals %}<p class="pill"><a href="/renewals">{{ pending_renewals }} 条续费申请待处理</a></p>{% endif %}
+
 <div class="list">
   {% for lesson in lessons %}
   <article class="item">
@@ -17,6 +20,7 @@
     </div>
     <h2>{{ lesson.student_name }} · {{ lesson.course_name }}</h2>
     <p>{{ lesson.teacher_name }} · 剩余 {{ lesson.current_balance }} 节</p>
+    {% if lesson.current_balance <= 0 %}<p class="error">课时已用完{% if overdraft %}，最多还能透支 {{ overdraft }} 节，请提醒学生续费{% else %}，请先续费再记录{% endif %}</p>{% endif %}
     {% if lesson.status == "planned" %}
     <div class="actions">
       <form method="post" action="/lessons/{{ lesson.id }}/complete"><button class="primary">完成本节</button></form>

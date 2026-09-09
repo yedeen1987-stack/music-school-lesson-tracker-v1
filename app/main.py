@@ -1,4 +1,12 @@
+import os
+import threading
+import time
 from datetime import date
+
+if os.getenv("TZ") and hasattr(time, "tzset"):
+    time.tzset()
+
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -6,11 +14,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.database import db_session
+from app.emailer import process_email_queue
 from app.models import SCHEMA_SQL
-from app.security import read_session, sign_session
+from app.security import read_session, read_student_token, sign_session
 from app.services import (
     add_course_package,
     authenticate,
+    change_password,
+    list_renewal_requests,
+    mark_renewal_handled,
+    overdraft_limit,
+    request_renewal,
+    student_portal_data,
+    student_portal_url,
     create_student,
     current_user,
     ensure_default_settings,
@@ -28,12 +44,28 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+EMAIL_WORKER_INTERVAL = int(os.getenv("EMAIL_WORKER_INTERVAL", "20"))
+
+
+def email_worker_loop():
+    """后台线程按固定间隔发送邮件队列，页面请求不再等待 SMTP。"""
+    while True:
+        try:
+            with db_session() as conn:
+                process_email_queue(conn)
+        except Exception:
+            pass
+        time.sleep(EMAIL_WORKER_INTERVAL)
+
+
 @app.on_event("startup")
 def startup():
     with db_session() as conn:
         init_schema(conn, SCHEMA_SQL)
         seed_data(conn)
         ensure_default_settings(conn)
+    if os.getenv("EMAIL_WORKER_ENABLED", "1") == "1":
+        threading.Thread(target=email_worker_loop, daemon=True).start()
 
 
 def get_user(request: Request):
@@ -73,17 +105,35 @@ def logout():
 
 
 @app.get("/", response_class=HTMLResponse)
-def today(request: Request, user=Depends(get_user)):
+def today(request: Request, error: str = "", user=Depends(get_user)):
     with db_session() as conn:
         lessons = list_today_lessons(conn, user)
         teachers = conn.execute("SELECT * FROM teachers WHERE active = 1 ORDER BY id").fetchall()
-        return render(request, "today.html", {"user": user, "lessons": lessons, "teachers": teachers, "today": date.today()})
+        pending_renewals = len(list_renewal_requests(conn, user))
+        return render(
+            request,
+            "today.html",
+            {
+                "user": user,
+                "lessons": lessons,
+                "teachers": teachers,
+                "today": date.today(),
+                "overdraft": overdraft_limit(conn),
+                "pending_renewals": pending_renewals,
+                "error": error,
+            },
+        )
 
 
 @app.post("/lessons/{lesson_id}/{action}")
 def lesson_action(lesson_id: int, action: str, user=Depends(get_user)):
     with db_session() as conn:
-        record_lesson(conn, user, lesson_id, action)
+        try:
+            record_lesson(conn, user, lesson_id, action)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc))
+        except ValueError as exc:
+            return RedirectResponse(f"/?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
@@ -162,7 +212,17 @@ def student_detail(student_id: int, request: Request, user=Depends(get_user)):
         if not rows:
             raise HTTPException(404)
         teachers = conn.execute("SELECT * FROM teachers WHERE active = 1").fetchall()
-        return render(request, "student_detail.html", {"user": user, "student": rows[0], "packages": rows, "teachers": teachers})
+        return render(
+            request,
+            "student_detail.html",
+            {
+                "user": user,
+                "student": rows[0],
+                "packages": rows,
+                "teachers": teachers,
+                "portal_url": student_portal_url(conn, student_id),
+            },
+        )
 
 
 @app.post("/students/{student_id}/packages")
@@ -258,6 +318,8 @@ def settings(request: Request, user=Depends(get_user)):
 def save_settings(
     reminder_time: str = Form(...),
     low_balance_thresholds: str = Form(...),
+    overdraft_limit_value: str = Form("0"),
+    public_base_url: str = Form(""),
     user=Depends(get_user),
 ):
     if user["role"] != "admin":
@@ -265,4 +327,75 @@ def save_settings(
     with db_session() as conn:
         update_setting(conn, "reminder_time", reminder_time)
         update_setting(conn, "low_balance_thresholds", low_balance_thresholds)
+        update_setting(conn, "overdraft_limit", overdraft_limit_value)
+        update_setting(conn, "public_base_url", public_base_url.strip())
     return RedirectResponse("/settings", status_code=303)
+
+
+@app.get("/password", response_class=HTMLResponse)
+def password_page(request: Request, error: str = "", saved: int = 0, user=Depends(get_user)):
+    return render(request, "password.html", {"user": user, "error": error, "saved": saved})
+
+
+@app.post("/password")
+def update_password(
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    user=Depends(get_user),
+):
+    with db_session() as conn:
+        try:
+            change_password(conn, user["id"], current_password, new_password)
+        except (PermissionError, ValueError) as exc:
+            return RedirectResponse(f"/password?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/password?saved=1", status_code=303)
+
+
+@app.get("/renewals", response_class=HTMLResponse)
+def renewals(request: Request, user=Depends(get_user)):
+    with db_session() as conn:
+        return render(
+            request,
+            "renewals.html",
+            {
+                "user": user,
+                "open_requests": list_renewal_requests(conn, user, "open"),
+                "handled_requests": list_renewal_requests(conn, user, "handled"),
+            },
+        )
+
+
+@app.post("/renewals/{renewal_id}/handled")
+def handle_renewal(renewal_id: int, user=Depends(get_user)):
+    with db_session() as conn:
+        try:
+            mark_renewal_handled(conn, user, renewal_id)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc))
+    return RedirectResponse("/renewals", status_code=303)
+
+
+@app.get("/p/{token}", response_class=HTMLResponse)
+def student_portal(token: str, request: Request, sent: int = 0):
+    """学生用签名链接查看自己的课时，不需要账号密码。"""
+    student_id = read_student_token(token)
+    if not student_id:
+        raise HTTPException(404)
+    with db_session() as conn:
+        data = student_portal_data(conn, student_id)
+        if not data:
+            raise HTTPException(404)
+        return render(request, "portal.html", {"token": token, "sent": sent, **data})
+
+
+@app.post("/p/{token}/renew/{package_id}")
+def student_request_renewal(token: str, package_id: int):
+    student_id = read_student_token(token)
+    if not student_id:
+        raise HTTPException(404)
+    with db_session() as conn:
+        try:
+            request_renewal(conn, student_id, package_id)
+        except ValueError:
+            raise HTTPException(404)
+    return RedirectResponse(f"/p/{token}?sent=1", status_code=303)

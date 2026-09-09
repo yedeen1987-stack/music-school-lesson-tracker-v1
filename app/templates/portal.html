@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的课时</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page">
+    <h1>{{ student.name }} 的课时</h1>
+    {% if sent %}<p class="pill">续费申请已提交，老师会尽快联系你</p>{% endif %}
+
+    <div class="list">
+    {% for package in packages %}
+      <article class="item">
+        <div class="row">
+          <strong>{{ package.course_name }}</strong>
+          <span class="status">{{ package.teacher_name }}</span>
+        </div>
+        <h2>剩余 {{ package.current_balance }} 节</h2>
+        <p>累计购买 {{ package.purchased_lessons }} 节</p>
+        {% if package.pending_renewal %}
+          <p class="pill">续费申请处理中</p>
+        {% else %}
+          <form method="post" action="/p/{{ token }}/renew/{{ package.id }}"><button class="primary">我要续费</button></form>
+        {% endif %}
+      </article>
+    {% else %}
+      <p class="empty">暂无课程</p>
+    {% endfor %}
+    </div>
+
+    <h2 class="subhead">最近记录</h2>
+    <div class="list">
+    {% for record in records %}
+      <article class="item">
+        <div class="row"><strong>{{ record.course_name }}</strong><span>{{ record.created_at }}</span></div>
+        <p>{{ {"complete":"完成一节","skip":"跳过","undo_complete":"撤销完成","undo_skip":"撤销跳过","adjust":"调整"}.get(record.action, record.action) }} · 之后剩余 {{ record.balance_after }} 节</p>
+      </article>
+    {% else %}
+      <p class="empty">暂无记录</p>
+    {% endfor %}
+    </div>
+  </main>
+</body>
+</html>

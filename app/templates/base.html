@@ -10,13 +10,17 @@
   {% if user %}
   <header class="topbar">
     <a class="brand" href="/">课时记录</a>
-    <form method="post" action="/logout"><button class="link-button">退出</button></form>
+    <div class="actions">
+      <a class="link-button" href="/password">改密码</a>
+      <form method="post" action="/logout"><button class="link-button">退出</button></form>
+    </div>
   </header>
   <nav class="tabs">
     <a href="/">今日</a>
     <a href="/students">学生</a>
     <a href="/schedule">排课</a>
     <a href="/records">记录</a>
+    <a href="/renewals">续费</a>
     {% if user.role == "admin" %}
     <a href="/teachers">老师</a>
     <a href="/settings">设置</a>
