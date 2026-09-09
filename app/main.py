@@ -45,6 +45,11 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+def cookie_secure_enabled():
+    value = os.getenv("COOKIE_SECURE", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 EMAIL_WORKER_INTERVAL = int(os.getenv("EMAIL_WORKER_INTERVAL", "20"))
 
 
@@ -94,14 +99,25 @@ def login(username: str = Form(...), password: str = Form(...)):
         if not user:
             return RedirectResponse("/login?error=1", status_code=303)
         response = RedirectResponse("/", status_code=303)
-        response.set_cookie("session", sign_session(user["id"]), httponly=True, samesite="lax")
+        response.set_cookie(
+            "session",
+            sign_session(user["id"]),
+            httponly=True,
+            samesite="lax",
+            secure=cookie_secure_enabled(),
+        )
         return response
 
 
 @app.post("/logout")
 def logout():
     response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("session")
+    response.delete_cookie(
+        "session",
+        httponly=True,
+        samesite="lax",
+        secure=cookie_secure_enabled(),
+    )
     return response
 
 
