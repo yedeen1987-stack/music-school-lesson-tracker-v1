@@ -114,10 +114,12 @@ def test_today_failure_notice_respects_role(conn, monkeypatch, role):
 
 @pytest.mark.parametrize('value', ['25:00', '19:60', '', '7:00'])
 def test_settings_reject_invalid_reminder_time(value):
-    from app.main import save_settings, HTTPException
-    with pytest.raises(HTTPException) as exc:
-        save_settings(reminder_time=value, low_balance_thresholds='5', user={'role': 'admin'})
-    assert exc.value.status_code == 422
+    from app.main import save_settings
+
+    response = save_settings(reminder_time=value, low_balance_thresholds='5', user={'role': 'admin'})
+    # 跳回设置页并在顶部提示，不抛出白底错误页；此时不应写入任何设置
+    assert response.status_code == 303
+    assert response.headers['location'].startswith('/settings?error=')
 
 
 def test_backup_without_remote_preserves_database(tmp_path, monkeypatch):
@@ -163,3 +165,34 @@ def test_upload_calls_rclone_with_target_and_remote(tmp_path, monkeypatch):
     monkeypatch.setattr(backup_sqlite.subprocess, 'run', lambda *args, **kwargs: calls.append((args, kwargs)))
     backup_sqlite.upload_backup(target)
     assert calls == [((['rclone', 'copy', str(target), 'remote:school backups'],), {'check': True, 'timeout': 300})]
+
+
+def test_reminder_catches_up_after_server_missed_the_configured_minute(conn):
+    """服务器在提醒时间前后重启，恢复后当天仍要补发，不能整天不发。"""
+    conn.execute("UPDATE settings SET value = '19:00' WHERE key = 'reminder_time'")
+    # 18:58 关机，19:03 才恢复，第一次触发已经错过了 19:00 这一分钟
+    assert run_reminders(conn, datetime(2026, 9, 6, 19, 3))
+    queued = conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0]
+    assert queued == 4
+    conn.commit()
+    # 补发之后当天不再重复
+    assert not run_reminders(conn, datetime(2026, 9, 6, 19, 4))
+    assert not run_reminders(conn, datetime(2026, 9, 6, 23, 59))
+    assert conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0] == queued
+
+
+def test_reminder_does_not_fire_before_configured_time(conn):
+    conn.execute("UPDATE settings SET value = '19:00' WHERE key = 'reminder_time'")
+    assert not run_reminders(conn, datetime(2026, 9, 6, 0, 0))
+    assert not run_reminders(conn, datetime(2026, 9, 6, 18, 59))
+    assert conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0] == 0
+
+
+def test_each_day_is_judged_independently_after_a_catch_up(conn):
+    conn.execute("UPDATE settings SET value = '19:00' WHERE key = 'reminder_time'")
+    assert run_reminders(conn, datetime(2026, 9, 6, 21, 30))  # 当天补发
+    conn.commit()
+    first_day = conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0]
+    assert not run_reminders(conn, datetime(2026, 9, 13, 18, 0))  # 另一天未到时间
+    assert run_reminders(conn, datetime(2026, 9, 13, 19, 0))  # 另一天按时发送
+    assert conn.execute('SELECT COUNT(*) FROM email_logs').fetchone()[0] > first_day

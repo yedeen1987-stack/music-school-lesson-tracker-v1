@@ -306,14 +306,14 @@ def records(request: Request, user=Depends(get_user)):
 
 
 @app.get("/settings", response_class=HTMLResponse)
-def settings(request: Request, user=Depends(get_user)):
+def settings(request: Request, error: str = "", user=Depends(get_user)):
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
         settings_rows = conn.execute("SELECT * FROM settings").fetchall()
         settings_map = {row["key"]: row["value"] for row in settings_rows}
         logs = conn.execute("SELECT * FROM email_logs ORDER BY id DESC LIMIT 50").fetchall()
-        return render(request, "settings.html", {"user": user, "settings": settings_rows, "settings_map": settings_map, "logs": logs, "email_summary": email_queue_summary(conn)})
+        return render(request, "settings.html", {"user": user, "settings": settings_rows, "settings_map": settings_map, "logs": logs, "email_summary": email_queue_summary(conn), "error": error})
 
 
 @app.post("/settings")
@@ -326,8 +326,9 @@ def save_settings(
 ):
     if user["role"] != "admin":
         raise HTTPException(403)
-    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', reminder_time):
-        raise HTTPException(422, '提醒时间必须是 HH:MM（00:00–23:59）')
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", reminder_time):
+        # 和其他表单一致：跳回页面顶部显示提示，而不是抛出一个白底错误页
+        return RedirectResponse(f"/settings?error={quote('提醒时间必须是 HH:MM（00:00–23:59）')}", status_code=303)
     with db_session() as conn:
         update_setting(conn, "reminder_time", reminder_time)
         update_setting(conn, "low_balance_thresholds", low_balance_thresholds)

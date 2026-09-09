@@ -55,7 +55,7 @@ sudo systemctl enable --now music-school-backup.timer
 systemctl list-timers | grep music-school
 ```
 
-`music-school-reminders.timer` 每分钟触发检查。脚本按 `/etc/music-school.env` 的 `TZ` 读取“基础设置”中的提醒时间（默认 19:00，支持分钟），仅在对应分钟将明天的课程入队。当天只入队一次，已执行后再修改时间也不重复；错过该分钟不补发。实际投递由邮件队列完成，可能稍晚于设置时间。日常调时间只需改网页。
+`music-school-reminders.timer` 每分钟触发检查。脚本按 `/etc/music-school.env` 的 `TZ` 读取“基础设置”中的提醒时间（默认 19:00，支持分钟），到达该时间后将明天的课程入队。当天只入队一次，已执行后再修改时间也不重复；服务器重启或负载导致错过该时间点时，恢复后会在当天补发。实际投递由邮件队列完成，可能稍晚于设置时间。日常调时间只需改网页。
 
 已有部署升级时重新复制 timer 并重启，否则旧的每日定时器仍会生效：
 
