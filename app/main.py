@@ -13,11 +13,12 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from app.database import db_session
 from app.emailer import process_email_queue, email_queue_summary
 from app.models import SCHEMA_SQL
-from app.security import read_session, read_student_token, sign_session
+from app.security import SECRET_KEY, read_session, read_student_token, sign_session
 from app.services import (
     add_course_package,
     authenticate,
@@ -29,6 +30,7 @@ from app.services import (
     student_portal_data,
     student_portal_url,
     create_student,
+    delete_student,
     current_user,
     ensure_default_settings,
     init_schema,
@@ -42,6 +44,7 @@ from app.services import (
 app = FastAPI(title="音乐机构课时记录 V1")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+delete_confirmation = URLSafeTimedSerializer(SECRET_KEY, salt="student-delete-confirmation")
 
 
 def cookie_secure_enabled():
@@ -239,6 +242,36 @@ def student_detail(student_id: int, request: Request, user=Depends(get_user)):
                 "portal_url": student_portal_url(conn, student_id),
             },
         )
+
+
+@app.get("/students/{student_id}/delete", response_class=HTMLResponse)
+def confirm_student_delete(student_id: int, request: Request, user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        student = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not student:
+            raise HTTPException(404)
+        token = delete_confirmation.dumps({"student_id": student_id, "user_id": user["id"]})
+        return render(request, "student_delete.html", {"user": user, "student": student, "confirmation": token})
+
+
+@app.post("/students/{student_id}/delete")
+def delete_student_route(student_id: int, confirmation: str = Form(...), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    try:
+        data = delete_confirmation.loads(confirmation, max_age=900)
+    except BadSignature:
+        raise HTTPException(403, "确认已失效，请返回学生详情页重新确认")
+    if data != {"student_id": student_id, "user_id": user["id"]}:
+        raise HTTPException(403)
+    with db_session() as conn:
+        try:
+            delete_student(conn, student_id)
+        except ValueError:
+            raise HTTPException(404)
+    return RedirectResponse("/students", status_code=303)
 
 
 @app.post("/students/{student_id}/packages")

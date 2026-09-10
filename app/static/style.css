@@ -112,3 +112,5 @@ input, select {
   .list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .login { max-width: 420px; margin: 64px auto; }
 }
+
+.danger { color: #a52828; border-color: #a52828; }

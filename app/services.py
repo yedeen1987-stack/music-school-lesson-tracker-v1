@@ -81,6 +81,36 @@ def create_student(conn, name, phone, email, course_name, teacher_id, purchased_
     return student_id
 
 
+def delete_student(conn, student_id):
+    """删除一个学生及关联数据；保留外层事务，失败时撤销全部删除。"""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    conn.execute("SAVEPOINT delete_student")
+    try:
+        if not conn.execute("SELECT 1 FROM students WHERE id = ?", (student_id,)).fetchone():
+            raise ValueError("学生不存在")
+        packages = "SELECT id FROM course_packages WHERE student_id = ?"
+        schedules = f"SELECT id FROM schedules WHERE course_package_id IN ({packages})"
+        instances = f"SELECT id FROM lesson_instances WHERE schedule_id IN ({schedules})"
+        renewals = f"SELECT id FROM renewal_requests WHERE course_package_id IN ({packages})"
+        for related_type, ids in (
+            ("course_package", packages), ("schedule", schedules),
+            ("lesson_instance", instances), ("renewal_request", renewals),
+        ):
+            conn.execute(
+                f"DELETE FROM email_logs WHERE related_type = ? AND related_id IN ({ids})",
+                (related_type, student_id),
+            )
+        conn.execute(f"DELETE FROM lesson_transactions WHERE course_package_id IN ({packages})", (student_id,))
+        conn.execute(f"DELETE FROM lesson_records WHERE course_package_id IN ({packages})", (student_id,))
+        conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT delete_student")
+        raise
+    finally:
+        conn.execute("RELEASE SAVEPOINT delete_student")
+
+
 def add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons):
     existing = conn.execute(
         """

@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 {% if portal_url %}<div class="panel"><p>学生自助查询链接（可直接发给学生）</p><p><code>{{ portal_url }}</code></p></div>{% endif %}
-<section class="heading"><h1>{{ student.name }}</h1></section>
+<section class="heading">
+  <h1>{{ student.name }}</h1>
+  {% if user.role == "admin" %}<a class="button danger" href="/students/{{ student.id }}/delete">删除学生</a>{% endif %}
+</section>
 <div class="panel">
   <p>电话：{{ student.phone or "-" }}</p>
   <p>Email：{{ student.email }}</p>
