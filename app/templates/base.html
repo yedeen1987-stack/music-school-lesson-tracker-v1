@@ -21,8 +21,10 @@
     <a href="/schedule">排课</a>
     <a href="/records">记录</a>
     <a href="/renewals">续费</a>
+    <a href="/archive">归档</a>
     {% if user.role == "admin" %}
     <a href="/teachers">老师</a>
+    <a href="/unassigned">无老师课程</a>
     <a href="/settings">设置</a>
     {% endif %}
   </nav>

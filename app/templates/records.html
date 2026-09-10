@@ -6,7 +6,7 @@
   <article class="item">
     <div class="row"><strong>{{ record.student_name }} · {{ record.course_name }}</strong><span>{{ record.created_at }}</span></div>
     <p>{{ record.teacher_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p>
-    {% if record.action in ["complete", "skip"] %}
+    {% if record.action in ["complete", "skip"] and record.can_undo %}
     <form method="post" action="/records/{{ record.id }}/undo"><button>撤销</button></form>
     {% endif %}
   </article>

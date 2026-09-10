@@ -13,13 +13,19 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from app.database import db_session
 from app.emailer import process_email_queue, email_queue_summary
 from app.models import SCHEMA_SQL
-from app.security import read_session, read_student_token, sign_session
+from app.security import SECRET_KEY, read_session, read_student_token, sign_session
 from app.services import (
     add_course_package,
+    assign_teacher,
+    list_unassigned_courses,
+    require_student_access,
+    set_student_active,
+    set_teacher_active,
     authenticate,
     change_password,
     list_renewal_requests,
@@ -42,6 +48,7 @@ from app.services import (
 app = FastAPI(title="音乐机构课时记录 V1")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+archive_signer = URLSafeTimedSerializer(SECRET_KEY, salt="music-school-archive")
 
 
 def cookie_secure_enabled():
@@ -135,6 +142,7 @@ def today(request: Request, error: str = "", user=Depends(get_user)):
                 "today": date.today(),
                 "overdraft": overdraft_limit(conn),
                 "pending_renewals": pending_renewals,
+                "unassigned_count": len(list_unassigned_courses(conn)) if user["role"] == "admin" else 0,
                 "email_summary": email_queue_summary(conn),
                 "error": error,
             },
@@ -156,21 +164,26 @@ def lesson_action(lesson_id: int, action: str, user=Depends(get_user)):
 @app.post("/records/{record_id}/undo")
 def undo(record_id: int, user=Depends(get_user)):
     with db_session() as conn:
-        undo_last_record(conn, user, record_id)
+        try:
+            undo_last_record(conn, user, record_id)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     return RedirectResponse("/records", status_code=303)
 
 
 @app.get("/students", response_class=HTMLResponse)
 def students(request: Request, user=Depends(get_user)):
     with db_session() as conn:
-        where = ""
+        where = "WHERE st.active=1 AND cp.active=1"
         params = []
         if user["role"] == "teacher":
-            where = "WHERE cp.teacher_id = ?"
+            where += " AND cp.teacher_id = ?"
             params.append(user["teacher_id"])
         rows = conn.execute(
             f"""
-            SELECT st.id, st.name, st.phone, st.email, cp.course_name, cp.current_balance, t.name AS teacher_name
+            SELECT st.id, st.name, st.phone, st.email, cp.course_name, cp.current_balance, CASE WHEN t.active=1 THEN t.name ELSE '无老师' END AS teacher_name
             FROM students st
             JOIN course_packages cp ON cp.student_id = st.id
             JOIN teachers t ON t.id = cp.teacher_id
@@ -206,7 +219,10 @@ def create_student_route(
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
-        create_student(conn, name, phone, email, course_name, teacher_id, purchased_lessons, weekday, planned_time)
+        try:
+            create_student(conn, name, phone, email, course_name, teacher_id, purchased_lessons, weekday, planned_time)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     return RedirectResponse("/students", status_code=303)
 
 
@@ -217,10 +233,10 @@ def student_detail(student_id: int, request: Request, user=Depends(get_user)):
         params = [student_id] + ([user["teacher_id"]] if user["role"] == "teacher" else [])
         rows = conn.execute(
             f"""
-            SELECT st.*, cp.id AS package_id, cp.course_name, cp.current_balance, cp.purchased_lessons, t.name AS teacher_name
+            SELECT st.*, cp.id AS package_id, cp.course_name, cp.current_balance, cp.purchased_lessons, CASE WHEN t.active=1 THEN t.name ELSE '无老师（原老师：' || t.name || '）' END AS teacher_name
             FROM students st
-            JOIN course_packages cp ON cp.student_id = st.id
-            JOIN teachers t ON t.id = cp.teacher_id
+            LEFT JOIN course_packages cp ON cp.student_id = st.id
+            LEFT JOIN teachers t ON t.id = cp.teacher_id
             WHERE st.id = ? {teacher_clause}
             """,
             params,
@@ -234,9 +250,12 @@ def student_detail(student_id: int, request: Request, user=Depends(get_user)):
             {
                 "user": user,
                 "student": rows[0],
-                "packages": rows,
+                "packages": [row for row in rows if row["package_id"] is not None],
                 "teachers": teachers,
                 "portal_url": student_portal_url(conn, student_id),
+                "records": conn.execute(f"""SELECT lr.*, cp.course_name FROM lesson_records lr
+                    JOIN course_packages cp ON cp.id=lr.course_package_id
+                    WHERE cp.student_id=? {teacher_clause} ORDER BY lr.id DESC""", params).fetchall(),
             },
         )
 
@@ -246,7 +265,10 @@ def add_package(student_id: int, course_name: str = Form(...), teacher_id: int =
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
-        add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons)
+        try:
+            add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     return RedirectResponse(f"/students/{student_id}", status_code=303)
 
 
@@ -255,7 +277,7 @@ def teachers(request: Request, user=Depends(get_user)):
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
-        rows = conn.execute("SELECT * FROM teachers ORDER BY id").fetchall()
+        rows = conn.execute("SELECT * FROM teachers WHERE active=1 ORDER BY id").fetchall()
         return render(request, "teachers.html", {"user": user, "teachers": rows})
 
 
@@ -271,7 +293,9 @@ def add_teacher(name: str = Form(...), email: str = Form(...), user=Depends(get_
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule(request: Request, user=Depends(get_user)):
     with db_session() as conn:
-        where = "WHERE cp.teacher_id = ?" if user["role"] == "teacher" else ""
+        where = "WHERE st.active=1 AND cp.active=1 AND s.active=1 AND t.active=1"
+        if user["role"] == "teacher":
+            where += " AND cp.teacher_id = ?"
         params = [user["teacher_id"]] if user["role"] == "teacher" else []
         rows = conn.execute(
             f"""
@@ -294,7 +318,10 @@ def edit_schedule(schedule_id: int, teacher_id: int = Form(...), weekday: int = 
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
-        update_schedule(conn, schedule_id, teacher_id, weekday, planned_time)
+        try:
+            update_schedule(conn, schedule_id, teacher_id, weekday, planned_time)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     return RedirectResponse("/schedule", status_code=303)
 
 
@@ -305,7 +332,8 @@ def records(request: Request, user=Depends(get_user)):
         params = [user["teacher_id"]] if user["role"] == "teacher" else []
         rows = conn.execute(
             f"""
-            SELECT lr.*, st.name AS student_name, cp.course_name, t.name AS teacher_name
+            SELECT lr.*, st.name AS student_name, cp.course_name, t.name AS teacher_name,
+                   (st.active=1 AND cp.active=1 AND t.active=1) AS can_undo
             FROM lesson_records lr
             JOIN course_packages cp ON cp.id = lr.course_package_id
             JOIN students st ON st.id = cp.student_id
@@ -391,6 +419,8 @@ def handle_renewal(renewal_id: int, user=Depends(get_user)):
             mark_renewal_handled(conn, user, renewal_id)
         except PermissionError as exc:
             raise HTTPException(403, str(exc))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
     return RedirectResponse("/renewals", status_code=303)
 
 
@@ -418,3 +448,99 @@ def student_request_renewal(token: str, package_id: int):
         except ValueError:
             raise HTTPException(404)
     return RedirectResponse(f"/p/{token}?sent=1", status_code=303)
+
+
+@app.get("/archive", response_class=HTMLResponse)
+def archive(request: Request, user=Depends(get_user)):
+    with db_session() as conn:
+        scope = "" if user["role"] == "admin" else "AND EXISTS (SELECT 1 FROM course_packages cp WHERE cp.student_id=st.id AND cp.teacher_id=?)"
+        params = [] if user["role"] == "admin" else [user["teacher_id"]]
+        students = conn.execute(f"SELECT st.* FROM students st WHERE st.active=0 {scope} ORDER BY st.name", params).fetchall()
+        teachers = conn.execute("SELECT * FROM teachers WHERE active=0 ORDER BY name").fetchall() if user["role"] == "admin" else []
+        return render(request, "archive.html", {"user": user, "students": students, "teachers": teachers})
+
+
+@app.get("/archive/teachers/{teacher_id}", response_class=HTMLResponse)
+def archived_teacher(teacher_id: int, request: Request, user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        teacher = conn.execute("SELECT * FROM teachers WHERE id=? AND active=0", (teacher_id,)).fetchone()
+        if not teacher:
+            raise HTTPException(404)
+        packages = conn.execute("""SELECT h.*, cp.course_name, st.name AS student_name
+            FROM teacher_archive_courses h JOIN course_packages cp ON cp.id=h.course_package_id
+            JOIN students st ON st.id=cp.student_id WHERE h.teacher_id=? ORDER BY cp.id""", (teacher_id,)).fetchall()
+        records = conn.execute("""SELECT lr.*, cp.course_name, st.name AS student_name
+            FROM teacher_archive_courses h JOIN lesson_records lr ON lr.course_package_id=h.course_package_id AND lr.id<=h.last_record_id
+            JOIN course_packages cp ON cp.id=lr.course_package_id JOIN students st ON st.id=cp.student_id
+            WHERE h.teacher_id=? ORDER BY lr.id DESC""", (teacher_id,)).fetchall()
+        return render(request, "teacher_archive.html", {"user": user, "teacher": teacher, "packages": packages, "records": records})
+
+
+def archive_subject(conn, user, kind, subject_id):
+    if kind == "students":
+        try:
+            return require_student_access(conn, user, subject_id)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+    if kind != "teachers":
+        raise HTTPException(404)
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    subject = conn.execute("SELECT * FROM teachers WHERE id=?", (subject_id,)).fetchone()
+    if not subject:
+        raise HTTPException(404)
+    return subject
+
+
+@app.get("/archive/{kind}/{subject_id}/{action}", response_class=HTMLResponse)
+def archive_confirmation(kind: str, subject_id: int, action: str, request: Request, user=Depends(get_user)):
+    if action not in ("deactivate", "restore"):
+        raise HTTPException(404)
+    with db_session() as conn:
+        subject = archive_subject(conn, user, kind, subject_id)
+        balances = conn.execute("SELECT course_name, current_balance FROM course_packages WHERE student_id=? ORDER BY id", (subject_id,)).fetchall() if kind == "students" else []
+        confirmation = archive_signer.dumps([user["id"], kind, subject_id, action])
+        return render(request, "archive_confirm.html", {"user": user, "subject": subject, "kind": kind,
+            "action": action, "balances": balances, "confirmation": confirmation})
+
+
+@app.post("/archive/{kind}/{subject_id}/{action}")
+def archive_action(kind: str, subject_id: int, action: str, confirmation: str = Form(...), user=Depends(get_user)):
+    if action not in ("deactivate", "restore"):
+        raise HTTPException(404)
+    try:
+        valid = archive_signer.loads(confirmation, max_age=900)
+    except BadSignature:
+        raise HTTPException(403, "确认已失效，请重新打开确认页")
+    if valid != [user["id"], kind, subject_id, action]:
+        raise HTTPException(403)
+    with db_session() as conn:
+        archive_subject(conn, user, kind, subject_id)
+        operation = set_student_active if kind == "students" else set_teacher_active
+        operation(conn, user, subject_id, action == "restore")
+    return RedirectResponse("/archive" if action == "deactivate" else "/" + kind, status_code=303)
+
+
+@app.get("/unassigned", response_class=HTMLResponse)
+def unassigned(request: Request, error: str = "", user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        return render(request, "unassigned.html", {"user": user, "packages": list_unassigned_courses(conn),
+            "teachers": conn.execute("SELECT * FROM teachers WHERE active=1 ORDER BY name").fetchall(), "error": error})
+
+
+@app.post("/unassigned/{package_id}")
+def assign_course_teacher(package_id: int, teacher_id: int = Form(...), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        try:
+            assign_teacher(conn, user, package_id, teacher_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/unassigned?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/unassigned", status_code=303)

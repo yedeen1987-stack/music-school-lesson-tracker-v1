@@ -12,6 +12,7 @@ from app.emailer import (
     notify_schedule_changed,
     portal_url,
     reset_balance_alerts,
+    suppress_inactive_emails,
 )
 
 
@@ -48,12 +49,13 @@ def ensure_default_settings(conn):
 def current_user(conn, user_id: int | None):
     if not user_id:
         return None
-    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return conn.execute("""SELECT u.* FROM users u WHERE u.id = ?
+        AND (u.role = 'admin' OR EXISTS (SELECT 1 FROM teachers t WHERE t.id = u.teacher_id AND t.active = 1))""", (user_id,)).fetchone()
 
 
 def authenticate(conn, username: str, password: str):
     user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-    if not user or not verify_password(password, user["password"]):
+    if not user or not current_user(conn, user["id"]) or not verify_password(password, user["password"]):
         return None
     if not is_hashed(user["password"]):
         # 老库里的明文密码，登录成功时顺手升级成哈希
@@ -82,6 +84,9 @@ def create_student(conn, name, phone, email, course_name, teacher_id, purchased_
 
 
 def add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons):
+    require_active_teacher(conn, teacher_id)
+    if not conn.execute("SELECT 1 FROM students WHERE id = ? AND active = 1", (student_id,)).fetchone():
+        raise ValueError("学生已停用或不存在")
     existing = conn.execute(
         """
         SELECT id, purchased_lessons, current_balance
@@ -124,6 +129,10 @@ def add_course_package(conn, student_id, course_name, teacher_id, purchased_less
 
 
 def update_schedule(conn, schedule_id, teacher_id, weekday, planned_time):
+    require_active_teacher(conn, teacher_id)
+    if not conn.execute("""SELECT 1 FROM schedules s JOIN course_packages cp ON cp.id=s.course_package_id
+        JOIN students st ON st.id=cp.student_id WHERE s.id=? AND st.active=1 AND cp.active=1""", (schedule_id,)).fetchone():
+        raise ValueError("排课不存在或学生已停用")
     conn.execute(
         """
         UPDATE course_packages SET teacher_id = ?
@@ -135,13 +144,16 @@ def update_schedule(conn, schedule_id, teacher_id, weekday, planned_time):
         "UPDATE schedules SET weekday = ?, planned_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (weekday, planned_time, schedule_id),
     )
+    suppress_inactive_emails(conn)
     notify_schedule_changed(conn, schedule_id)
 
 
 def ensure_today_instances(conn, today: date | None = None):
     today = today or date.today()
     weekday = today.weekday()
-    schedules = conn.execute("SELECT id FROM schedules WHERE active = 1 AND weekday = ?", (weekday,)).fetchall()
+    schedules = conn.execute("""SELECT s.id FROM schedules s JOIN course_packages cp ON cp.id=s.course_package_id
+        JOIN students st ON st.id=cp.student_id JOIN teachers t ON t.id=cp.teacher_id
+        WHERE s.active=1 AND cp.active=1 AND st.active=1 AND t.active=1 AND s.weekday=?""", (weekday,)).fetchall()
     for schedule in schedules:
         conn.execute(
             "INSERT OR IGNORE INTO lesson_instances (schedule_id, lesson_date) VALUES (?, ?)",
@@ -166,7 +178,7 @@ def list_today_lessons(conn, user, today: date | None = None):
         JOIN course_packages cp ON cp.id = s.course_package_id
         JOIN students st ON st.id = cp.student_id
         JOIN teachers t ON t.id = cp.teacher_id
-        WHERE li.lesson_date = ? {teacher_filter}
+        WHERE li.lesson_date = ? AND s.active=1 AND cp.active=1 AND st.active=1 AND t.active=1 {teacher_filter}
         ORDER BY s.planned_time, st.name
         """,
         params,
@@ -174,19 +186,13 @@ def list_today_lessons(conn, user, today: date | None = None):
 
 
 def can_access_instance(conn, user, instance_id):
-    if user["role"] == "admin":
-        return True
-    row = conn.execute(
-        """
-        SELECT cp.teacher_id
-        FROM lesson_instances li
-        JOIN schedules s ON s.id = li.schedule_id
-        JOIN course_packages cp ON cp.id = s.course_package_id
-        WHERE li.id = ?
-        """,
-        (instance_id,),
-    ).fetchone()
-    return row and row["teacher_id"] == user["teacher_id"]
+    row = conn.execute("""
+        SELECT cp.teacher_id FROM lesson_instances li
+        JOIN schedules s ON s.id=li.schedule_id JOIN course_packages cp ON cp.id=s.course_package_id
+        JOIN students st ON st.id=cp.student_id JOIN teachers t ON t.id=cp.teacher_id
+        WHERE li.id=? AND s.active=1 AND cp.active=1 AND st.active=1 AND t.active=1
+    """, (instance_id,)).fetchone()
+    return bool(row and (user["role"] == "admin" or row["teacher_id"] == user["teacher_id"]))
 
 
 def record_lesson(conn, user, instance_id, action):
@@ -285,7 +291,7 @@ def student_portal_url(conn, student_id: int) -> str:
 
 
 def student_portal_data(conn, student_id: int):
-    student = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+    student = conn.execute("SELECT * FROM students WHERE id = ? AND active = 1", (student_id,)).fetchone()
     if not student:
         return None
     packages = conn.execute(
@@ -316,7 +322,8 @@ def student_portal_data(conn, student_id: int):
 def request_renewal(conn, student_id: int, course_package_id: int):
     """学生点“我要续费”，只登记意向，不做在线支付。"""
     package = conn.execute(
-        "SELECT id, current_balance FROM course_packages WHERE id = ? AND student_id = ?",
+        """SELECT cp.id, cp.current_balance FROM course_packages cp JOIN students st ON st.id=cp.student_id
+        WHERE cp.id = ? AND cp.student_id = ? AND cp.active=1 AND st.active=1""",
         (course_package_id, student_id),
     ).fetchone()
     if not package:
@@ -349,7 +356,7 @@ def list_renewal_requests(conn, user, status: str = "open"):
         JOIN course_packages cp ON cp.id = rr.course_package_id
         JOIN students st ON st.id = cp.student_id
         JOIN teachers t ON t.id = cp.teacher_id
-        WHERE rr.status = ? {teacher_filter}
+        WHERE rr.status = ? AND st.active=1 {teacher_filter}
         ORDER BY rr.id DESC
         """,
         params,
@@ -362,7 +369,8 @@ def mark_renewal_handled(conn, user, renewal_id: int):
         SELECT rr.id, cp.teacher_id
         FROM renewal_requests rr
         JOIN course_packages cp ON cp.id = rr.course_package_id
-        WHERE rr.id = ?
+        JOIN students st ON st.id = cp.student_id
+        WHERE rr.id = ? AND st.active=1
         """,
         (renewal_id,),
     ).fetchone()
@@ -374,3 +382,66 @@ def mark_renewal_handled(conn, user, renewal_id: int):
         "UPDATE renewal_requests SET status = 'handled', handled_at = ? WHERE id = ?",
         (datetime.now().isoformat(timespec="seconds"), renewal_id),
     )
+
+
+def require_active_teacher(conn, teacher_id):
+    if not conn.execute("SELECT 1 FROM teachers WHERE id=? AND active=1", (teacher_id,)).fetchone():
+        raise ValueError("请选择在职老师")
+
+
+def require_student_access(conn, user, student_id):
+    student = conn.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if not student:
+        raise ValueError("学生不存在")
+    if user["role"] != "admin" and not conn.execute("""SELECT 1 FROM course_packages cp
+        JOIN teachers t ON t.id=cp.teacher_id WHERE cp.student_id=? AND cp.teacher_id=? AND t.active=1""",
+        (student_id, user["teacher_id"])).fetchone():
+        raise PermissionError("只能操作自己的学生")
+    return student
+
+
+def set_student_active(conn, user, student_id, active):
+    require_student_access(conn, user, student_id)
+    conn.execute("UPDATE students SET active=? WHERE id=?", (int(active), student_id))
+    if not active:
+        suppress_inactive_emails(conn)
+
+
+def set_teacher_active(conn, user, teacher_id, active):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以操作老师")
+    teacher = conn.execute("SELECT * FROM teachers WHERE id=?", (teacher_id,)).fetchone()
+    if not teacher:
+        raise ValueError("老师不存在")
+    if teacher["active"] and not active:
+        conn.execute("""INSERT INTO teacher_archive_courses(teacher_id, course_package_id, balance_at_archive, last_record_id)
+            SELECT teacher_id, id, current_balance,
+                COALESCE((SELECT MAX(lr.id) FROM lesson_records lr WHERE lr.course_package_id=cp.id), 0)
+            FROM course_packages cp WHERE teacher_id=?
+            ON CONFLICT(teacher_id, course_package_id) DO UPDATE SET
+                balance_at_archive=excluded.balance_at_archive, last_record_id=excluded.last_record_id,
+                archived_at=CURRENT_TIMESTAMP""", (teacher_id,))
+    conn.execute("UPDATE teachers SET active=? WHERE id=?", (int(active), teacher_id))
+    if not active:
+        suppress_inactive_emails(conn)
+
+
+def list_unassigned_courses(conn):
+    return conn.execute("""SELECT cp.*, st.name AS student_name, t.name AS teacher_name
+        FROM course_packages cp JOIN students st ON st.id=cp.student_id JOIN teachers t ON t.id=cp.teacher_id
+        WHERE st.active=1 AND cp.active=1 AND t.active=0 ORDER BY st.name, cp.id""").fetchall()
+
+
+def assign_teacher(conn, user, package_id, teacher_id):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以分配老师")
+    require_active_teacher(conn, teacher_id)
+    row = conn.execute("""SELECT cp.id FROM course_packages cp JOIN students st ON st.id=cp.student_id
+        JOIN teachers t ON t.id=cp.teacher_id WHERE cp.id=? AND cp.active=1 AND st.active=1 AND t.active=0""",
+        (package_id,)).fetchone()
+    if not row:
+        raise ValueError("该课程已分配老师、已停用或不存在，请刷新列表")
+    conn.execute("UPDATE course_packages SET teacher_id=? WHERE id=?", (teacher_id, package_id))
+    suppress_inactive_emails(conn)
+    for row in conn.execute("SELECT id FROM schedules WHERE course_package_id=? AND active=1", (package_id,)):
+        notify_schedule_changed(conn, row["id"])
