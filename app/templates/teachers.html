@@ -3,7 +3,7 @@
 <h1>老师</h1>
 <div class="list">
 {% for teacher in teachers %}
-  <article class="item"><h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p></article>
+  <article class="item"><h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p><a class="button" href="/archive/teachers/{{ teacher.id }}/deactivate">移除老师</a></article>
 {% endfor %}
 </div>
 <form method="post" action="/teachers" class="form">

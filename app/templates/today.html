@@ -8,6 +8,7 @@
   <span class="pill">{{ "管理员" if user.role == "admin" else "老师" }}</span>
 </section>
 
+{% if user.role == "admin" and unassigned_count %}<p class="error"><a href="/unassigned">{{ unassigned_count }} 门课程暂无老师，请尽快分配</a></p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if email_summary.failed %}
 <p class="error" role="alert">过去 24 小时有 {{ email_summary.failed }} 封邮件发送失败。

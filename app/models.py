@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS students (
     name TEXT NOT NULL,
     phone TEXT,
     email TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -122,6 +123,20 @@ CREATE TABLE IF NOT EXISTS renewal_requests (
     FOREIGN KEY (course_package_id) REFERENCES course_packages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS email_suppressions (
+    email_log_id INTEGER PRIMARY KEY REFERENCES email_logs(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS teacher_archive_courses (
+    teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+    course_package_id INTEGER NOT NULL REFERENCES course_packages(id),
+    balance_at_archive INTEGER NOT NULL,
+    last_record_id INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (teacher_id, course_package_id)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -131,6 +146,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 
 MIGRATIONS = {
+    "students": {"active": "ALTER TABLE students ADD COLUMN active INTEGER NOT NULL DEFAULT 1"},
     "email_logs": {
         "attempts": "ALTER TABLE email_logs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
         "next_attempt_at": "ALTER TABLE email_logs ADD COLUMN next_attempt_at TEXT",

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 {% if portal_url %}<div class="panel"><p>学生自助查询链接（可直接发给学生）</p><p><code>{{ portal_url }}</code></p></div>{% endif %}
-<section class="heading"><h1>{{ student.name }}</h1></section>
+<section class="heading"><h1>{{ student.name }}{% if not student.active %} · 已停用{% endif %}</h1>
+<a class="button" href="/archive/students/{{ student.id }}/{{ 'deactivate' if student.active else 'restore' }}">{{ '移除学生' if student.active else '恢复学生' }}</a></section>
 <div class="panel">
   <p>电话：{{ student.phone or "-" }}</p>
   <p>Email：{{ student.email }}</p>
@@ -15,7 +16,7 @@
   </article>
 {% endfor %}
 </div>
-{% if user.role == "admin" %}
+{% if user.role == "admin" and student.active %}
 <h2 class="subhead">续费课时</h2>
 <form method="post" action="/students/{{ student.id }}/packages" class="form">
   <label>课程<input name="course_name" required></label>
@@ -24,4 +25,9 @@
   <button class="primary">增加</button>
 </form>
 {% endif %}
+<h2 class="subhead">上课记录</h2>
+<div class="list">
+{% for record in records %}<article class="item"><p>{{ record.created_at }} · {{ record.course_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p></article>
+{% else %}<p class="empty">暂无记录</p>{% endfor %}
+</div>
 {% endblock %}

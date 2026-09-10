@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>无老师课程</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<div class="list">{% for package in packages %}<article class="item"><h2>{{ package.student_name }} · {{ package.course_name }}</h2><p>剩余 {{ package.current_balance }} 节 · 原老师：{{ package.teacher_name }}</p>
+{% if teachers %}<form method="post" action="/unassigned/{{ package.id }}" class="actions"><label>新老师<select name="teacher_id" required><option value="" selected disabled>请选择老师</option>{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}</select></label><button class="primary">分配老师</button></form>{% else %}<p>暂无在职老师，请先新增或恢复老师。</p>{% endif %}
+</article>{% else %}<p class="empty">所有在读课程均已分配老师</p>{% endfor %}</div>
+{% endblock %}

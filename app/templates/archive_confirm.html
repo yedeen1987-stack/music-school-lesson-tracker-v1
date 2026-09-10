@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ '移除' if action == 'deactivate' else '恢复' }}{{ '学生' if kind == 'students' else '老师' }}</h1>
+<div class="panel">
+<h2>确定{{ '移除' if action == 'deactivate' else '恢复' }} {{ subject.name }}？</h2>
+{% if kind == 'students' %}
+{% for balance in balances %}<p>{{ balance.course_name }}：剩余 {{ balance.current_balance }} 节课时会原样保留。</p>{% endfor %}
+<p>停用后不再显示在学生列表和今日课程中，不再发送邮件，自助链接失效。历史记录保留，随时可以恢复。恢复时若原老师已停用，课程会进入「无老师」列表。</p>
+{% else %}<p>停用后不再接收邮件、无法登录，也不能在排课中选择。名下在读课程保留并进入「无老师」列表，分配新老师前不生成今日课程。历史记录可在归档页查询，随时可以恢复。</p>{% endif %}
+<form method="post" class="actions">
+<input type="hidden" name="confirmation" value="{{ confirmation }}">
+<a class="button" href="{{ '/students/' ~ subject.id if kind == 'students' else '/teachers' if subject.active else '/archive' }}">取消</a>
+<button class="primary" type="submit">确认{{ '移除' if action == 'deactivate' else '恢复' }}</button>
+</form>
+</div>
+{% endblock %}

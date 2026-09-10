@@ -19,7 +19,7 @@ def now_iso() -> str:
 def email_queue_summary(conn, now=None):
     now = now or datetime.now()
     bounds = ((now - timedelta(hours=24)).isoformat(timespec='seconds'), now.isoformat(timespec='seconds'))
-    pending = conn.execute("SELECT COUNT(*) FROM email_logs WHERE status = 'pending'").fetchone()[0]
+    pending = conn.execute("SELECT COUNT(*) FROM email_logs WHERE status = 'pending' AND NOT EXISTS (SELECT 1 FROM email_suppressions x WHERE x.email_log_id = email_logs.id)").fetchone()[0]
     failed = conn.execute(
         "SELECT COUNT(*) FROM email_logs WHERE status = 'failed' AND last_attempt_at BETWEEN ? AND ?", bounds
     ).fetchone()[0]
@@ -45,9 +45,42 @@ def smtp_config():
     }
 
 
+def email_is_allowed(conn, recipient_type, recipient_email, related_type, related_id):
+    """按业务关联检查停用状态，不能按共用邮箱推断学生身份。"""
+    package_queries = {
+        "course_package": "SELECT id FROM course_packages WHERE id = ?",
+        "schedule": "SELECT course_package_id FROM schedules WHERE id = ?",
+        "lesson_instance": "SELECT s.course_package_id FROM lesson_instances li JOIN schedules s ON s.id = li.schedule_id WHERE li.id = ?",
+        "renewal_request": "SELECT course_package_id FROM renewal_requests WHERE id = ?",
+    }
+    query = package_queries.get(related_type)
+    if query is None:
+        return True
+    row = conn.execute(f"""
+        SELECT st.active AS student_active, cp.active AS package_active,
+               t.active AS teacher_active, t.email AS teacher_email
+        FROM course_packages cp JOIN students st ON st.id = cp.student_id
+        JOIN teachers t ON t.id = cp.teacher_id
+        WHERE cp.id IN ({query})
+    """, (related_id,)).fetchone()
+    if not row or not row["student_active"] or not row["package_active"] or not row["teacher_active"]:
+        return False
+    # Reassignment must not send a previously queued notice to the old teacher.
+    return recipient_type != "teacher" or recipient_email == row["teacher_email"]
+
+
+def suppress_inactive_emails(conn):
+    """保留 email_logs 原文和状态，用独立表永久阻止过期队列发送。"""
+    rows = conn.execute("""SELECT e.* FROM email_logs e WHERE e.status = 'pending'
+        AND NOT EXISTS (SELECT 1 FROM email_suppressions x WHERE x.email_log_id = e.id)""").fetchall()
+    for row in rows:
+        if not email_is_allowed(conn, row["recipient_type"], row["recipient_email"], row["related_type"], row["related_id"]):
+            conn.execute("INSERT OR IGNORE INTO email_suppressions(email_log_id) VALUES (?)", (row["id"],))
+
+
 def queue_email(conn, to_email: str, recipient_type: str, subject: str, body: str, related_type: str, related_id: int):
     """只入队，不发信。老师点“完成本节”时不会被 SMTP 阻塞。"""
-    if not to_email:
+    if not to_email or not email_is_allowed(conn, recipient_type, to_email, related_type, related_id):
         return
     conn.execute(
         """
@@ -73,12 +106,16 @@ def deliver_email(config, to_email: str, subject: str, body: str):
 
 def process_email_queue(conn, limit: int = 20, sender=None):
     """把队列里到期的邮件发出去，失败按退避重试，返回 (成功数, 失败数)。"""
+    # Serialize sending and archive operations: after archive commits no queued mail can slip through.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    suppress_inactive_emails(conn)
     config = smtp_config()
     now = now_iso()
     rows = conn.execute(
         """
         SELECT * FROM email_logs
-        WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+        WHERE status = 'pending' AND NOT EXISTS (SELECT 1 FROM email_suppressions x WHERE x.email_log_id = email_logs.id) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
         ORDER BY id
         LIMIT ?
         """,
@@ -123,6 +160,8 @@ def process_email_queue(conn, limit: int = 20, sender=None):
 
 def portal_url(conn, student_id: int) -> str:
     """学生自助查询链接。没设置 public_base_url 时返回空串，邮件里就不带链接。"""
+    if not conn.execute("SELECT 1 FROM students WHERE id = ? AND active = 1", (student_id,)).fetchone():
+        return ""
     row = conn.execute("SELECT value FROM settings WHERE key = 'public_base_url'").fetchone()
     base = (row["value"] if row else "").strip().rstrip("/")
     return f"{base}/p/{sign_student_token(student_id)}" if base else ""
@@ -210,6 +249,8 @@ def reset_balance_alerts(conn, course_package_id: int, balance: int):
 
 def notify_low_balance_if_needed(conn, course_package_id: int, balance_after: int):
     """余额跌破任一阈值就提醒一次；跨过多个阈值只发一封，且不会因为错过精确数字而漏发。"""
+    if not email_is_allowed(conn, "student", "", "course_package", course_package_id):
+        return
     notified = {
         row["threshold"]
         for row in conn.execute(
@@ -268,7 +309,7 @@ def create_reminder_logs(conn, target_weekday: int):
         JOIN course_packages cp ON cp.id = s.course_package_id
         JOIN students st ON st.id = cp.student_id
         JOIN teachers t ON t.id = cp.teacher_id
-        WHERE s.active = 1 AND s.reminder_enabled = 1 AND s.weekday = ?
+        WHERE s.active = 1 AND s.reminder_enabled = 1 AND s.weekday = ? AND st.active = 1 AND cp.active = 1 AND t.active = 1
         """,
         (target_weekday,),
     ).fetchall()

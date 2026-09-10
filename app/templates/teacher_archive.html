@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="heading"><h1>{{ teacher.name }} · 已停用</h1><a class="button" href="/archive/teachers/{{ teacher.id }}/restore">恢复老师</a></section>
+<h2 class="subhead">停用前课程</h2>
+<div class="list">{% for package in packages %}<article class="item"><h2>{{ package.student_name }} · {{ package.course_name }}</h2><p>停用时余额 {{ package.balance_at_archive }} 节 · {{ package.archived_at }}</p></article>{% else %}<p class="empty">暂无课程</p>{% endfor %}</div>
+<h2 class="subhead">停用前上课记录</h2>
+<div class="list">{% for record in records %}<article class="item"><p>{{ record.created_at }} · {{ record.student_name }} · {{ record.course_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p></article>{% else %}<p class="empty">暂无记录</p>{% endfor %}</div>
+{% endblock %}

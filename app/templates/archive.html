@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>归档</h1>
+<h2 class="subhead">已停用学生</h2>
+<div class="list">{% for student in students %}<article class="item"><h2>{{ student.name }}</h2><div class="actions"><a class="button" href="/students/{{ student.id }}">课程余额与记录</a><a class="button" href="/archive/students/{{ student.id }}/restore">恢复</a></div></article>{% else %}<p class="empty">暂无已停用学生</p>{% endfor %}</div>
+{% if user.role == 'admin' %}
+<h2 class="subhead">已停用老师</h2>
+<div class="list">{% for teacher in teachers %}<article class="item"><h2>{{ teacher.name }}</h2><div class="actions"><a class="button" href="/archive/teachers/{{ teacher.id }}">课程与历史记录</a><a class="button" href="/archive/teachers/{{ teacher.id }}/restore">恢复</a></div></article>{% else %}<p class="empty">暂无已停用老师</p>{% endfor %}</div>
+{% endif %}
+{% endblock %}
