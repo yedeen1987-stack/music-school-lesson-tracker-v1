@@ -105,11 +105,12 @@ def deliver_email(config, to_email: str, subject: str, body: str):
 
 
 def process_email_queue(conn, limit: int = 20, sender=None):
-    """把队列里到期的邮件发出去，失败按退避重试，返回 (成功数, 失败数)。"""
-    # Serialize sending and archive operations: after archive commits no queued mail can slip through.
-    if not conn.in_transaction:
-        conn.execute("BEGIN IMMEDIATE")
-    suppress_inactive_emails(conn)
+    """处理已入队邮件，返回 (成功数, 失败数)；本函数负责提交投递事务。
+
+    先提交调用方的入队/初始化写入，再逐封检查、发送并提交结果。
+    SMTP 网络调用期间不持有数据库写事务；已进入发送的单封邮件可能无法撤回。
+    """
+    conn.commit()
     config = smtp_config()
     now = now_iso()
     rows = conn.execute(
@@ -125,35 +126,49 @@ def process_email_queue(conn, limit: int = 20, sender=None):
     sent = 0
     failed = 0
     for row in rows:
+        # The batch snapshot may be stale after the previous SMTP call.
+        pending = conn.execute("""SELECT 1 FROM email_logs e WHERE e.id=? AND e.status='pending'
+            AND NOT EXISTS (SELECT 1 FROM email_suppressions x WHERE x.email_log_id=e.id)""",
+            (row["id"],)).fetchone()
+        if not pending:
+            continue
+        if not email_is_allowed(conn, row["recipient_type"], row["recipient_email"], row["related_type"], row["related_id"]):
+            with conn:
+                conn.execute("INSERT OR IGNORE INTO email_suppressions(email_log_id) VALUES (?)", (row["id"],))
+            continue
         if not config:
             # 没配 SMTP：不真正发信，但保留记录，方便本地验证流程。
-            conn.execute(
-                "UPDATE email_logs SET status = 'disabled', last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
-                (now, row["id"]),
-            )
+            with conn:
+                conn.execute(
+                    "UPDATE email_logs SET status = 'disabled', last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
+                    (now, row["id"]),
+                )
             continue
         attempts = row["attempts"] + 1
         try:
             (sender or deliver_email)(config, row["recipient_email"], row["subject"], row["body"])
         except Exception as exc:
             if attempts >= MAX_ATTEMPTS:
-                conn.execute(
-                    "UPDATE email_logs SET status = 'failed', error = ?, attempts = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
-                    (str(exc), attempts, now, row["id"]),
-                )
+                with conn:
+                    conn.execute(
+                        "UPDATE email_logs SET status = 'failed', error = ?, attempts = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
+                        (str(exc), attempts, now, row["id"]),
+                    )
                 failed += 1
             else:
                 delay = RETRY_BACKOFF_MINUTES[attempts - 1]
                 retry_at = (datetime.now() + timedelta(minutes=delay)).isoformat(timespec="seconds")
-                conn.execute(
-                    "UPDATE email_logs SET error = ?, attempts = ?, last_attempt_at = ?, next_attempt_at = ? WHERE id = ?",
-                    (str(exc), attempts, now, retry_at, row["id"]),
-                )
+                with conn:
+                    conn.execute(
+                        "UPDATE email_logs SET error = ?, attempts = ?, last_attempt_at = ?, next_attempt_at = ? WHERE id = ?",
+                        (str(exc), attempts, now, retry_at, row["id"]),
+                    )
         else:
-            conn.execute(
-                "UPDATE email_logs SET status = 'sent', error = NULL, attempts = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
-                (attempts, now, row["id"]),
-            )
+            with conn:
+                conn.execute(
+                    "UPDATE email_logs SET status = 'sent', error = NULL, attempts = ?, last_attempt_at = ?, next_attempt_at = NULL WHERE id = ?",
+                    (attempts, now, row["id"]),
+                )
             sent += 1
     return sent, failed
 
