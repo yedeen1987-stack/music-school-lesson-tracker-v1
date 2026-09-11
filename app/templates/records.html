@@ -5,7 +5,10 @@
 {% for record in records %}
   <article class="item">
     <div class="row"><strong>{{ record.student_name }} · {{ record.course_name }}</strong><span>{{ record.created_at }}</span></div>
-    <p>{{ record.teacher_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p>
+    {% if record.action == 'adjust' %}
+    <p>调整课时 · {{ record.actor_name or '未知操作人' }} · 从 {{ record.balance_after - record.delta_lessons }} 节调到 {{ record.balance_after }} 节</p>
+    <p>原因：{{ record.note }}</p>
+    {% else %}<p>{{ record.teacher_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p>{% endif %}
     {% if record.action in ["complete", "skip"] and record.can_undo %}
     <form method="post" action="/records/{{ record.id }}/undo"><button>撤销</button></form>
     {% endif %}
