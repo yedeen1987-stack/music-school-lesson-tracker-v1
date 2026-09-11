@@ -450,6 +450,22 @@ def assign_teacher(conn, user, package_id, teacher_id):
         notify_schedule_changed(conn, row["id"])
 
 
+def edit_teacher_profile(conn, user, teacher_id, name, email):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以修改老师资料")
+    name, email = name.strip(), email.strip()
+    if not name:
+        raise ValueError("姓名不能为空")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("请输入有效的邮箱地址")
+    teacher = conn.execute("SELECT active FROM teachers WHERE id=?", (teacher_id,)).fetchone()
+    if not teacher:
+        raise ValueError("老师不存在")
+    if not teacher["active"]:
+        raise ValueError("请先恢复老师，再修改资料")
+    conn.execute("UPDATE teachers SET name=?, email=? WHERE id=?", (name, email, teacher_id))
+
+
 def edit_student_profile(conn, user, student_id, name, phone, email):
     if user["role"] != "admin":
         raise PermissionError("仅管理员可以修改学生资料")
