@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS lesson_instances (
 
 CREATE TABLE IF NOT EXISTS lesson_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    lesson_instance_id INTEGER NOT NULL,
+    lesson_instance_id INTEGER,
     course_package_id INTEGER NOT NULL,
     action TEXT NOT NULL CHECK (action IN ('complete', 'skip', 'undo_complete', 'undo_skip', 'adjust')),
     delta_lessons INTEGER NOT NULL,
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS lesson_records (
     actor_user_id INTEGER,
     note TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (action = 'adjust' OR lesson_instance_id IS NOT NULL),
     FOREIGN KEY (lesson_instance_id) REFERENCES lesson_instances(id),
     FOREIGN KEY (course_package_id) REFERENCES course_packages(id),
     FOREIGN KEY (actor_user_id) REFERENCES users(id)
@@ -163,6 +164,7 @@ def migrate_schema(conn):
             if column not in existing:
                 conn.execute(statement)
     drop_balance_check_constraint(conn)
+    allow_adjustments_without_lesson(conn)
 
 
 def drop_balance_check_constraint(conn):
@@ -198,3 +200,36 @@ def drop_balance_check_constraint(conn):
     conn.execute("DROP TABLE course_packages")
     conn.execute("ALTER TABLE course_packages_new RENAME TO course_packages")
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def allow_adjustments_without_lesson(conn):
+    """保留历史主键和外键引用，让手工调整无需伪造一节课。"""
+    columns = conn.execute("PRAGMA table_info(lesson_records)").fetchall()
+    if not any(row["name"] == "lesson_instance_id" and row["notnull"] for row in columns):
+        return
+    original = conn.execute("SELECT sql FROM sqlite_master WHERE name='lesson_records'").fetchone()[0]
+    updated = original.replace("lesson_instance_id INTEGER NOT NULL", "lesson_instance_id INTEGER")
+    if updated == original:
+        raise RuntimeError("无法识别 lesson_records 结构，停止迁移")
+    if "CHECK (action = 'adjust' OR lesson_instance_id IS NOT NULL)" not in updated:
+        updated = updated.replace("FOREIGN KEY (lesson_instance_id)", "CHECK (action = 'adjust' OR lesson_instance_id IS NOT NULL),\n    FOREIGN KEY (lesson_instance_id)", 1)
+    extras = conn.execute("SELECT sql FROM sqlite_master WHERE tbl_name='lesson_records' AND type IN ('index','trigger') AND sql IS NOT NULL").fetchall()
+    conn.commit()
+    foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(updated.replace("CREATE TABLE lesson_records", "CREATE TABLE lesson_records_new", 1))
+        conn.execute("INSERT INTO lesson_records_new SELECT * FROM lesson_records")
+        conn.execute("DROP TABLE lesson_records")
+        conn.execute("ALTER TABLE lesson_records_new RENAME TO lesson_records")
+        for extra in extras:
+            conn.execute(extra[0])
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("课时记录迁移外键校验失败")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute(f"PRAGMA foreign_keys={foreign_keys}")

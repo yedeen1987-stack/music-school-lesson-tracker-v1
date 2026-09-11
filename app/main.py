@@ -21,7 +21,10 @@ from app.models import SCHEMA_SQL
 from app.security import SECRET_KEY, read_session, read_student_token, sign_session
 from app.services import (
     add_course_package,
+    adjust_package_balance,
+    edit_student_profile,
     edit_teacher_profile,
+    rename_course_package
     assign_teacher,
     list_unassigned_courses,
     require_student_access,
@@ -228,7 +231,7 @@ def create_student_route(
 
 
 @app.get("/students/{student_id}", response_class=HTMLResponse)
-def student_detail(student_id: int, request: Request, user=Depends(get_user)):
+def student_detail(student_id: int, request: Request, user=Depends(get_user), error: str = ""):
     with db_session() as conn:
         teacher_clause = "AND cp.teacher_id = ?" if user["role"] == "teacher" else ""
         params = [student_id] + ([user["teacher_id"]] if user["role"] == "teacher" else [])
@@ -251,11 +254,13 @@ def student_detail(student_id: int, request: Request, user=Depends(get_user)):
             {
                 "user": user,
                 "student": rows[0],
+                "error": error,
                 "packages": [row for row in rows if row["package_id"] is not None],
                 "teachers": teachers,
                 "portal_url": student_portal_url(conn, student_id),
-                "records": conn.execute(f"""SELECT lr.*, cp.course_name FROM lesson_records lr
+                "records": conn.execute(f"""SELECT lr.*, cp.course_name, u.username AS actor_name FROM lesson_records lr
                     JOIN course_packages cp ON cp.id=lr.course_package_id
+                    LEFT JOIN users u ON u.id=lr.actor_user_id
                     WHERE cp.student_id=? {teacher_clause} ORDER BY lr.id DESC""", params).fetchall(),
             },
         )
@@ -333,12 +338,13 @@ def records(request: Request, user=Depends(get_user)):
         params = [user["teacher_id"]] if user["role"] == "teacher" else []
         rows = conn.execute(
             f"""
-            SELECT lr.*, st.name AS student_name, cp.course_name, t.name AS teacher_name,
+            SELECT lr.*, u.username AS actor_name, st.name AS student_name, cp.course_name, t.name AS teacher_name,
                    (st.active=1 AND cp.active=1 AND t.active=1) AS can_undo
             FROM lesson_records lr
             JOIN course_packages cp ON cp.id = lr.course_package_id
             JOIN students st ON st.id = cp.student_id
             JOIN teachers t ON t.id = cp.teacher_id
+            LEFT JOIN users u ON u.id = lr.actor_user_id
             {where}
             ORDER BY lr.id DESC
             LIMIT 100
@@ -549,6 +555,8 @@ def assign_course_teacher(package_id: int, teacher_id: int = Form(...), user=Dep
 
 @app.post("/teachers/{teacher_id}/edit")
 def edit_teacher(teacher_id: int, name: str = Form(""), email: str = Form(""), user=Depends(get_user)):
+@app.post("/students/{student_id}/edit")
+def edit_student(student_id: int, name: str = Form(""), phone: str = Form(""), email: str = Form(""), user=Depends(get_user)):
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
@@ -557,3 +565,37 @@ def edit_teacher(teacher_id: int, name: str = Form(""), email: str = Form(""), u
         except ValueError as exc:
             return RedirectResponse(f"/teachers?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/teachers", status_code=303)
+            edit_student_profile(conn, user, student_id, name, phone, email)
+        except ValueError as exc:
+            return RedirectResponse(f"/students/{student_id}?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/students/{student_id}", status_code=303)
+
+
+@app.post("/students/{student_id}/packages/{package_id}/rename")
+def rename_package(student_id: int, package_id: int, course_name: str = Form(""), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        if not conn.execute("SELECT 1 FROM course_packages WHERE id=? AND student_id=?", (package_id, student_id)).fetchone():
+            raise HTTPException(404)
+        try:
+            rename_course_package(conn, user, package_id, course_name)
+        except ValueError as exc:
+            return RedirectResponse(f"/students/{student_id}?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/students/{student_id}", status_code=303)
+
+
+@app.post("/students/{student_id}/packages/{package_id}/adjust")
+def adjust_balance(student_id: int, package_id: int, balance: str = Form(""), reason: str = Form(""), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        if not conn.execute("SELECT 1 FROM course_packages WHERE id=? AND student_id=?", (package_id, student_id)).fetchone():
+            raise HTTPException(404)
+        if not re.fullmatch(r"[0-9]{1,9}", balance.strip()):
+            return RedirectResponse(f"/students/{student_id}?error={quote('课时必须是大于或等于 0 的整数（最多 9 位）')}", status_code=303)
+        try:
+            adjust_package_balance(conn, user, package_id, int(balance), reason)
+        except ValueError as exc:
+            return RedirectResponse(f"/students/{student_id}?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/students/{student_id}", status_code=303)
