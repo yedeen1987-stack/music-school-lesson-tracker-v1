@@ -21,6 +21,7 @@ from app.models import SCHEMA_SQL
 from app.security import SECRET_KEY, read_session, read_student_token, sign_session
 from app.services import (
     add_course_package,
+    edit_teacher_profile,
     assign_teacher,
     list_unassigned_courses,
     require_student_access,
@@ -273,12 +274,12 @@ def add_package(student_id: int, course_name: str = Form(...), teacher_id: int =
 
 
 @app.get("/teachers", response_class=HTMLResponse)
-def teachers(request: Request, user=Depends(get_user)):
+def teachers(request: Request, user=Depends(get_user), error: str = ""):
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
         rows = conn.execute("SELECT * FROM teachers WHERE active=1 ORDER BY id").fetchall()
-        return render(request, "teachers.html", {"user": user, "teachers": rows})
+        return render(request, "teachers.html", {"user": user, "teachers": rows, "error": error})
 
 
 @app.post("/teachers")
@@ -544,3 +545,15 @@ def assign_course_teacher(package_id: int, teacher_id: int = Form(...), user=Dep
         except ValueError as exc:
             return RedirectResponse(f"/unassigned?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/unassigned", status_code=303)
+
+
+@app.post("/teachers/{teacher_id}/edit")
+def edit_teacher(teacher_id: int, name: str = Form(""), email: str = Form(""), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        try:
+            edit_teacher_profile(conn, user, teacher_id, name, email)
+        except ValueError as exc:
+            return RedirectResponse(f"/teachers?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/teachers", status_code=303)

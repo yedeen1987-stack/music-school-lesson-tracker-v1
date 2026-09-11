@@ -1,9 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>老师</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <div class="list">
 {% for teacher in teachers %}
-  <article class="item"><h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p><a class="button" href="/archive/teachers/{{ teacher.id }}/deactivate">移除老师</a></article>
+  <article class="item">
+    <h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p>
+    <details><summary>编辑老师资料</summary>
+      <form method="post" action="/teachers/{{ teacher.id }}/edit" class="form">
+        <label>姓名<input name="name" value="{{ teacher.name }}" required></label>
+        <label>Email<input name="email" type="email" value="{{ teacher.email }}" required></label>
+        <button class="primary">保存资料</button>
+      </form>
+    </details>
+    <a class="button" href="/archive/teachers/{{ teacher.id }}/deactivate">移除老师</a>
+  </article>
 {% endfor %}
 </div>
 <form method="post" action="/teachers" class="form">
