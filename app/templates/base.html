@@ -1,37 +1,6 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or "课时记录" }}</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-  {% if user %}
-  <header class="topbar">
-    <a class="brand" href="/">课时记录</a>
-    <div class="actions">
-      <a class="link-button" href="/password">改密码</a>
-      <form method="post" action="/logout"><button class="link-button">退出</button></form>
-    </div>
-  </header>
-  <nav class="tabs">
-    <a href="/">今日</a>
-    <a href="/students">学生</a>
-    <a href="/schedule">排课</a>
-    <a href="/records">记录</a>
-    <a href="/renewals">续费</a>
-    <a href="/archive">归档</a>
-    {% if user.role == "admin" %}
-    <a href="/teachers">老师</a>
-    <a href="/unassigned">无老师课程</a>
-    <a href="/settings">设置</a>
-    {% endif %}
-  </nav>
-  {% endif %}
-  <main class="page">
-    {% block content %}{% endblock %}
-  </main>
-</body>
-</html>
-
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ title or "课时记录" }}</title><link rel="stylesheet" href="/static/style.css"></head><body>
+{% if user %}<div class="app-shell"><aside class="sidebar"><div class="sidebar-brand"><a class="brand" href="/"><span class="brand-icon">♪</span><span>课时记录</span></a></div><nav class="sidebar-nav"><a href="/" class="{% if request.scope.get("path", "") == '/' %}active{% endif %}"><span class="nav-icon">⌂</span><span>今日</span></a><a href="/students" class="{% if request.scope.get("path", "").startswith('/students') %}active{% endif %}"><span class="nav-icon">👥</span><span>学生</span></a><a href="/schedule" class="{% if request.scope.get("path", "").startswith('/schedule') %}active{% endif %}"><span class="nav-icon">▦</span><span>排课</span></a><a href="/records" class="{% if request.scope.get("path", "").startswith('/records') %}active{% endif %}"><span class="nav-icon">☷</span><span>记录</span></a><a href="/renewals" class="{% if request.scope.get("path", "").startswith('/renewals') %}active{% endif %}"><span class="nav-icon">↻</span><span>续费</span></a><a href="/archive" class="{% if request.scope.get("path", "").startswith('/archive') %}active{% endif %}"><span class="nav-icon">□</span><span>归档</span></a>{% if user.role == 'admin' %}<div class="nav-divider"></div><a href="/teachers" class="{% if request.scope.get("path", "").startswith('/teachers') %}active{% endif %}"><span class="nav-icon">♬</span><span>老师</span></a><a href="/unassigned" class="{% if request.scope.get("path", "").startswith('/unassigned') %}active{% endif %}"><span class="nav-icon">!</span><span>无老师课程</span></a><a href="/settings" class="{% if request.scope.get("path", "").startswith('/settings') %}active{% endif %}"><span class="nav-icon">⚙</span><span>设置</span></a>{% endif %}</nav><div class="sidebar-footer"><a href="/password">修改密码</a><form method="post" action="/logout"><button class="logout-button">退出登录</button></form></div></aside><div class="app-main"><header class="mobile-header"><a class="brand" href="/"><span class="brand-icon">♪</span><span>课时记录</span></a><span class="pill">{{ '管理员' if user.role == 'admin' else '老师' }}</span></header><main class="page">
+{% else %}<main class="page login-page">{% endif %}
+{% block content %}{% endblock %}
+</main>
+{% if user %}<nav class="mobile-nav"><a href="/" class="{% if request.scope.get("path", "") == '/' %}active{% endif %}"><span>⌂</span><small>今日</small></a><a href="/students" class="{% if request.scope.get("path", "").startswith('/students') %}active{% endif %}"><span>👥</span><small>学生</small></a><a href="/schedule" class="{% if request.scope.get("path", "").startswith('/schedule') %}active{% endif %}"><span>▦</span><small>排课</small></a><a href="/records" class="{% if request.scope.get("path", "").startswith('/records') %}active{% endif %}"><span>☷</span><small>记录</small></a>{% if user.role == 'admin' %}<a href="/settings" class="{% if request.scope.get("path", "").startswith('/settings') %}active{% endif %}"><span>⚙</span><small>设置</small></a>{% else %}<a href="/renewals" class="{% if request.scope.get("path", "").startswith('/renewals') %}active{% endif %}"><span>↻</span><small>续费</small></a>{% endif %}</nav></div></div>{% endif %}</body></html>
