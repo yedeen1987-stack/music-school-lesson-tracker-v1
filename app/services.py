@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 
 from app.models import migrate_schema
 from app.security import hash_password, is_hashed, sign_student_token, verify_password
@@ -247,6 +248,8 @@ def undo_last_record(conn, user, record_id):
     record = conn.execute("SELECT * FROM lesson_records WHERE id = ?", (record_id,)).fetchone()
     if not record:
         raise ValueError("记录不存在")
+    if record["action"] not in ("complete", "skip"):
+        raise ValueError("该记录不能撤销，请使用调整课时并填写原因")
     if not can_access_instance(conn, user, record["lesson_instance_id"]):
         raise PermissionError("无权撤销")
     package = conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (record["course_package_id"],)).fetchone()
@@ -445,3 +448,69 @@ def assign_teacher(conn, user, package_id, teacher_id):
     suppress_inactive_emails(conn)
     for row in conn.execute("SELECT id FROM schedules WHERE course_package_id=? AND active=1", (package_id,)):
         notify_schedule_changed(conn, row["id"])
+
+
+def edit_student_profile(conn, user, student_id, name, phone, email):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以修改学生资料")
+    name, phone, email = name.strip(), phone.strip(), email.strip()
+    if not name:
+        raise ValueError("姓名不能为空")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("请输入有效的邮箱地址")
+    student = require_student_access(conn, user, student_id)
+    if not student["active"]:
+        raise ValueError("请先恢复学生，再修改资料")
+    conn.execute("UPDATE students SET name=?, phone=?, email=? WHERE id=?", (name, phone, email, student_id))
+
+
+def editable_package(conn, user, package_id):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以修改课程包")
+    package = conn.execute("""SELECT cp.* FROM course_packages cp JOIN students st ON st.id=cp.student_id
+        WHERE cp.id=? AND cp.active=1 AND st.active=1""", (package_id,)).fetchone()
+    if not package:
+        raise ValueError("课程包不存在或已停用")
+    return package
+
+
+def rename_course_package(conn, user, package_id, course_name):
+    package = editable_package(conn, user, package_id)
+    course_name = course_name.strip()
+    if not course_name:
+        raise ValueError("课程名称不能为空")
+    conn.execute("UPDATE course_packages SET course_name=? WHERE id=?", (course_name, package_id))
+    return package["student_id"]
+
+
+def adjust_package_balance(conn, user, package_id, new_balance, reason):
+    if user["role"] != "admin":
+        raise PermissionError("仅管理员可以调整课时")
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("必须填写调整原因")
+    if not isinstance(new_balance, int) or isinstance(new_balance, bool) or new_balance < 0:
+        raise ValueError("调整后的课时必须是大于或等于 0 的整数")
+    # Read and update the balance under one short write transaction; no network I/O.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    conn.execute("SAVEPOINT adjust_balance")
+    try:
+        package = editable_package(conn, user, package_id)
+        delta = new_balance - package["current_balance"]
+        conn.execute("UPDATE course_packages SET current_balance=? WHERE id=?", (new_balance, package_id))
+        record_id = conn.execute("""INSERT INTO lesson_records
+            (lesson_instance_id, course_package_id, action, delta_lessons, balance_after, actor_user_id, note)
+            VALUES (NULL, ?, 'adjust', ?, ?, ?, ?)""", (package_id, delta, new_balance, user["id"], reason)).lastrowid
+        conn.execute("""INSERT INTO lesson_transactions(course_package_id,lesson_record_id,delta_lessons,reason)
+            VALUES (?, ?, ?, ?)""", (package_id, record_id, delta, reason))
+        if delta > 0:
+            reset_balance_alerts(conn, package_id, new_balance)
+        elif delta < 0:
+            notify_low_balance_if_needed(conn, package_id, new_balance)
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT adjust_balance")
+        raise
+    finally:
+        conn.execute("RELEASE SAVEPOINT adjust_balance")
+    return package["student_id"]

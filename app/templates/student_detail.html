@@ -1,17 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if portal_url %}<div class="panel"><p>学生自助查询链接（可直接发给学生）</p><p><code>{{ portal_url }}</code></p></div>{% endif %}
 <section class="heading"><h1>{{ student.name }}{% if not student.active %} · 已停用{% endif %}</h1>
 <a class="button" href="/archive/students/{{ student.id }}/{{ 'deactivate' if student.active else 'restore' }}">{{ '移除学生' if student.active else '恢复学生' }}</a></section>
 <div class="panel">
   <p>电话：{{ student.phone or "-" }}</p>
   <p>Email：{{ student.email }}</p>
+  {% if user.role == 'admin' and student.active %}
+  <details><summary>编辑学生资料</summary>
+    <form method="post" action="/students/{{ student.id }}/edit" class="form">
+      <label>姓名<input name="name" value="{{ student.name }}" required></label>
+      <label>电话<input name="phone" value="{{ student.phone or '' }}"></label>
+      <label>Email<input name="email" type="email" value="{{ student.email }}" required></label>
+      <button class="primary">保存资料</button>
+    </form>
+  </details>
+  {% endif %}
 </div>
 <h2 class="subhead">课程包</h2>
 <div class="list">
 {% for package in packages %}
   <article class="item">
     <h2>{{ package.course_name }}</h2>
+    {% if user.role == 'admin' and student.active %}
+    <details><summary>修改课程名称</summary>
+      <form method="post" action="/students/{{ student.id }}/packages/{{ package.package_id }}/rename" class="form">
+        <label>课程名称<input name="course_name" value="{{ package.course_name }}" required></label>
+        <button>保存名称</button>
+      </form>
+    </details>
+    <details><summary>调整课时</summary>
+      <form method="post" action="/students/{{ student.id }}/packages/{{ package.package_id }}/adjust" class="form">
+        <p>当前剩余 {{ package.current_balance }} 节。此操作用于纠正余额，购课请使用续费。</p>
+        <label>调整后的剩余课时<input name="balance" type="number" min="0" max="999999999" step="1" required></label>
+        <label>调整原因<input name="reason" placeholder="例如：录入错误，实际购买 10 节" required></label>
+        <button>保存调整并记入流水</button>
+      </form>
+    </details>
+    {% endif %}
     <p>{{ package.teacher_name }} · 累计购买 {{ package.purchased_lessons }} 节 · 剩余 {{ package.current_balance }} 节</p>
   </article>
 {% endfor %}
@@ -27,7 +54,7 @@
 {% endif %}
 <h2 class="subhead">上课记录</h2>
 <div class="list">
-{% for record in records %}<article class="item"><p>{{ record.created_at }} · {{ record.course_name }} · {{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}</p></article>
+{% for record in records %}<article class="item"><p>{{ record.created_at }} · {{ record.course_name }} · {% if record.action == 'adjust' %}调整课时 · {{ record.actor_name or '未知操作人' }} · 从 {{ record.balance_after - record.delta_lessons }} 节调到 {{ record.balance_after }} 节 · 原因：{{ record.note }}{% else %}{{ record.action }} · {{ record.delta_lessons }} 节 · 余额 {{ record.balance_after }}{% endif %}</p></article>
 {% else %}<p class="empty">暂无记录</p>{% endfor %}
 </div>
 {% endblock %}
