@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>续费申请</h1>
-<div class="list">
+<div class="list renewal-list">
 {% for item in open_requests %}
   <article class="item">
     <div class="row"><strong>{{ item.student_name }} · {{ item.course_name }}</strong><span class="status">待处理</span></div>
@@ -19,7 +19,7 @@
 
 {% if handled_requests %}
 <h2 class="subhead">已处理</h2>
-<div class="list">
+<div class="list renewal-list">
 {% for item in handled_requests %}
   <article class="item">
     <div class="row"><strong>{{ item.student_name }} · {{ item.course_name }}</strong><span>{{ item.handled_at }}</span></div>

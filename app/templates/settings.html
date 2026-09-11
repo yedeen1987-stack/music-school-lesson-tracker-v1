@@ -26,7 +26,7 @@
   <p>邮件账号通过环境变量配置。余额提醒规则：剩余课时跌破任一阈值时提醒一次，续费后重新生效。</p>
 </div>
 <h2 class="subhead">邮件记录</h2>
-<div class="list">
+<div class="list email-log-list">
 {% for log in logs %}
   <article class="item">
     <div class="row"><strong>{{ log.recipient_email }}</strong><span class="status">{{ log.status }}</span></div>

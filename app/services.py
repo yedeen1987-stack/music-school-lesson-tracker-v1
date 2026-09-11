@@ -6,6 +6,34 @@ import re
 from app.models import migrate_schema
 from app.security import hash_password, is_hashed, sign_student_token, verify_password
 
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+TIME_RE = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+
+def _required_text(value, label):
+    value = (value or "").strip()
+    if not value:
+        raise ValueError(f"{label}不能为空")
+    return value
+
+def _valid_email(value):
+    value = (value or "").strip()
+    if not EMAIL_RE.fullmatch(value):
+        raise ValueError("请输入有效的邮箱地址")
+    return value
+
+def _valid_schedule(weekday, planned_time):
+    if not isinstance(weekday, int) or isinstance(weekday, bool) or not 0 <= weekday <= 6:
+        raise ValueError("星期必须是 0–6")
+    planned_time = (planned_time or "").strip()
+    if not TIME_RE.fullmatch(planned_time):
+        raise ValueError("上课时间必须是 HH:MM（00:00–23:59）")
+    return weekday, planned_time
+
+def _nonnegative_int(value, label="购买课时"):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label}必须是非负整数")
+    return value
+
 from app.emailer import (
     notify_lesson_completed,
     notify_low_balance_if_needed,
@@ -73,7 +101,20 @@ def change_password(conn, user_id: int, current_password: str, new_password: str
     conn.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), user_id))
 
 
+def create_teacher(conn, name, email):
+    name = _required_text(name, "姓名")
+    email = _valid_email(email)
+    return conn.execute("INSERT INTO teachers (name, email) VALUES (?, ?)", (name, email)).lastrowid
+
+
 def create_student(conn, name, phone, email, course_name, teacher_id, purchased_lessons, weekday, planned_time):
+    name = _required_text(name, "姓名")
+    phone = (phone or "").strip()
+    email = _valid_email(email)
+    course_name = _required_text(course_name, "课程名称")
+    purchased_lessons = _nonnegative_int(purchased_lessons)
+    weekday, planned_time = _valid_schedule(weekday, planned_time)
+    require_active_teacher(conn, teacher_id)
     cur = conn.execute("INSERT INTO students (name, phone, email) VALUES (?, ?, ?)", (name, phone, email))
     student_id = cur.lastrowid
     package_id = add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons)
@@ -85,6 +126,8 @@ def create_student(conn, name, phone, email, course_name, teacher_id, purchased_
 
 
 def add_course_package(conn, student_id, course_name, teacher_id, purchased_lessons):
+    course_name = _required_text(course_name, "课程名称")
+    purchased_lessons = _nonnegative_int(purchased_lessons)
     require_active_teacher(conn, teacher_id)
     if not conn.execute("SELECT 1 FROM students WHERE id = ? AND active = 1", (student_id,)).fetchone():
         raise ValueError("学生已停用或不存在")
@@ -130,6 +173,7 @@ def add_course_package(conn, student_id, course_name, teacher_id, purchased_less
 
 
 def update_schedule(conn, schedule_id, teacher_id, weekday, planned_time):
+    weekday, planned_time = _valid_schedule(weekday, planned_time)
     require_active_teacher(conn, teacher_id)
     if not conn.execute("""SELECT 1 FROM schedules s JOIN course_packages cp ON cp.id=s.course_package_id
         JOIN students st ON st.id=cp.student_id WHERE s.id=? AND st.active=1 AND cp.active=1""", (schedule_id,)).fetchone():
@@ -250,12 +294,14 @@ def undo_last_record(conn, user, record_id):
         raise ValueError("记录不存在")
     if record["action"] not in ("complete", "skip"):
         raise ValueError("该记录不能撤销，请使用调整课时并填写原因")
+    reverse_action = "undo_complete" if record["action"] == "complete" else "undo_skip"
+    if conn.execute("SELECT 1 FROM lesson_records WHERE lesson_instance_id=? AND action=? AND note=?", (record["lesson_instance_id"], reverse_action, f"撤销记录 #{record_id}")).fetchone():
+        raise ValueError("这条记录已经撤销，不能重复撤销")
     if not can_access_instance(conn, user, record["lesson_instance_id"]):
         raise PermissionError("无权撤销")
     package = conn.execute("SELECT current_balance FROM course_packages WHERE id = ?", (record["course_package_id"],)).fetchone()
     reverse_delta = -record["delta_lessons"]
     new_balance = package["current_balance"] + reverse_delta
-    reverse_action = "undo_complete" if record["action"] == "complete" else "undo_skip"
     conn.execute("UPDATE course_packages SET current_balance = ? WHERE id = ?", (new_balance, record["course_package_id"]))
     conn.execute("UPDATE lesson_instances SET status = 'planned', confirmed_at = NULL WHERE id = ?", (record["lesson_instance_id"],))
     cur = conn.execute(
@@ -453,11 +499,8 @@ def assign_teacher(conn, user, package_id, teacher_id):
 def edit_teacher_profile(conn, user, teacher_id, name, email):
     if user["role"] != "admin":
         raise PermissionError("仅管理员可以修改老师资料")
-    name, email = name.strip(), email.strip()
-    if not name:
-        raise ValueError("姓名不能为空")
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        raise ValueError("请输入有效的邮箱地址")
+    name = _required_text(name, "姓名")
+    email = _valid_email(email)
     teacher = conn.execute("SELECT active FROM teachers WHERE id=?", (teacher_id,)).fetchone()
     if not teacher:
         raise ValueError("老师不存在")
@@ -469,11 +512,8 @@ def edit_teacher_profile(conn, user, teacher_id, name, email):
 def edit_student_profile(conn, user, student_id, name, phone, email):
     if user["role"] != "admin":
         raise PermissionError("仅管理员可以修改学生资料")
-    name, phone, email = name.strip(), phone.strip(), email.strip()
-    if not name:
-        raise ValueError("姓名不能为空")
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        raise ValueError("请输入有效的邮箱地址")
+    name = _required_text(name, "姓名")
+    phone, email = (phone or "").strip(), _valid_email(email)
     student = require_student_access(conn, user, student_id)
     if not student["active"]:
         raise ValueError("请先恢复学生，再修改资料")

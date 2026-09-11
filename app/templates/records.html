@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>记录</h1>
-<div class="list">
+<div class="list records-list">
 {% for record in records %}
   <article class="item">
     <div class="row"><strong>{{ record.student_name }} · {{ record.course_name }}</strong><span>{{ record.created_at }}</span></div>

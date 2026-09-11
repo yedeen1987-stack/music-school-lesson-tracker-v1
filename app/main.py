@@ -39,6 +39,7 @@ from app.services import (
     student_portal_data,
     student_portal_url,
     create_student,
+    create_teacher,
     current_user,
     ensure_default_settings,
     init_schema,
@@ -292,7 +293,10 @@ def add_teacher(name: str = Form(...), email: str = Form(...), user=Depends(get_
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
-        conn.execute("INSERT INTO teachers (name, email) VALUES (?, ?)", (name, email))
+        try:
+            create_teacher(conn, name, email)
+        except ValueError as exc:
+            return RedirectResponse(f"/teachers?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/teachers", status_code=303)
 
 

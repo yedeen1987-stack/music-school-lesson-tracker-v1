@@ -138,3 +138,14 @@ def test_same_student_course_and_teacher_purchase_merges_into_existing_package(c
     assert count == 1
     assert row["purchased_lessons"] == 12
     assert row["current_balance"] == 12
+
+
+def test_same_record_cannot_be_undone_twice(conn):
+    lesson = first_lesson(conn)
+    before = balance_for_lesson(conn, lesson["id"])
+    record_lesson(conn, user(conn, "admin"), lesson["id"], "complete")
+    record_id = conn.execute("SELECT MAX(id) FROM lesson_records").fetchone()[0]
+    undo_last_record(conn, user(conn, "admin"), record_id)
+    with pytest.raises(ValueError, match="已经撤销"):
+        undo_last_record(conn, user(conn, "admin"), record_id)
+    assert balance_for_lesson(conn, lesson["id"]) == before

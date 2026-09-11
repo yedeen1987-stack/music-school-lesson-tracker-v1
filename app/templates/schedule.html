@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>固定排课</h1>
-<div class="list">
+<div class="list schedule-list">
 {% for item in schedules %}
   <article class="item">
     <h2>{{ ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"][item.weekday] }} {{ item.planned_time }}</h2>

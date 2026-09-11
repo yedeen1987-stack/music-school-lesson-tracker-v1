@@ -2,7 +2,7 @@
 {% block content %}
 <h1>老师</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-<div class="list">
+<div class="list teacher-list">
 {% for teacher in teachers %}
   <article class="item">
     <h2>{{ teacher.name }}</h2><p>{{ teacher.email }}</p>

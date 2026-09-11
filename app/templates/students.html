@@ -4,7 +4,7 @@
   <h1>学生</h1>
   {% if user.role == "admin" %}<a class="button" href="/students/new">新增学生</a>{% endif %}
 </section>
-<div class="list">
+<div class="list student-list">
 {% for student in students %}
   <a class="item link-item" href="/students/{{ student.id }}">
     <h2>{{ student.name }}</h2>
