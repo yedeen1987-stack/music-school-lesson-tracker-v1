@@ -39,6 +39,46 @@ CREATE TABLE IF NOT EXISTS course_packages (
     FOREIGN KEY (teacher_id) REFERENCES teachers(id)
 );
 
+CREATE TABLE IF NOT EXISTS student_lesson_balances (
+    student_id INTEGER PRIMARY KEY,
+    purchased_total INTEGER NOT NULL DEFAULT 0 CHECK (purchased_total >= 0),
+    current_balance INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS courses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS teacher_courses (
+    teacher_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL,
+    PRIMARY KEY (teacher_id, course_id),
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS student_courses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL,
+    teacher_id INTEGER NOT NULL,
+    weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    planned_time TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    FOREIGN KEY (course_id) REFERENCES courses(id),
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id)
+);
+
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     course_package_id INTEGER NOT NULL,
