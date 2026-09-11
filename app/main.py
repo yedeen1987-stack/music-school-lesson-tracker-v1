@@ -24,7 +24,7 @@ from app.services import (
     adjust_package_balance,
     edit_student_profile,
     edit_teacher_profile,
-    rename_course_package
+    rename_course_package,
     assign_teacher,
     list_unassigned_courses,
     require_student_access,
@@ -555,8 +555,6 @@ def assign_course_teacher(package_id: int, teacher_id: int = Form(...), user=Dep
 
 @app.post("/teachers/{teacher_id}/edit")
 def edit_teacher(teacher_id: int, name: str = Form(""), email: str = Form(""), user=Depends(get_user)):
-@app.post("/students/{student_id}/edit")
-def edit_student(student_id: int, name: str = Form(""), phone: str = Form(""), email: str = Form(""), user=Depends(get_user)):
     if user["role"] != "admin":
         raise HTTPException(403)
     with db_session() as conn:
@@ -565,6 +563,14 @@ def edit_student(student_id: int, name: str = Form(""), phone: str = Form(""), e
         except ValueError as exc:
             return RedirectResponse(f"/teachers?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/teachers", status_code=303)
+
+
+@app.post("/students/{student_id}/edit")
+def edit_student(student_id: int, name: str = Form(""), phone: str = Form(""), email: str = Form(""), user=Depends(get_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403)
+    with db_session() as conn:
+        try:
             edit_student_profile(conn, user, student_id, name, phone, email)
         except ValueError as exc:
             return RedirectResponse(f"/students/{student_id}?error={quote(str(exc))}", status_code=303)
