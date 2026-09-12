@@ -532,9 +532,14 @@ def editable_package(conn, user, package_id):
 
 def rename_course_package(conn, user, package_id, course_name):
     package = editable_package(conn, user, package_id)
-    course_name = course_name.strip()
-    if not course_name:
-        raise ValueError("课程名称不能为空")
+    course_name = _required_text(course_name, "课程名称")
+    duplicate = conn.execute(
+        """SELECT 1 FROM course_packages
+        WHERE student_id=? AND teacher_id=? AND course_name=? AND active=1 AND id!=?""",
+        (package["student_id"], package["teacher_id"], course_name, package_id),
+    ).fetchone()
+    if duplicate:
+        raise ValueError("该学生在这位老师名下已有同名课程")
     conn.execute("UPDATE course_packages SET course_name=? WHERE id=?", (course_name, package_id))
     return package["student_id"]
 

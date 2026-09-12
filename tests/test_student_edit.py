@@ -7,7 +7,7 @@ from test_archive import conn, http, user, package, history
 from app.database import connect
 from app.models import SCHEMA_SQL
 from app.services import (
-    adjust_package_balance, edit_student_profile, init_schema, list_today_lessons,
+    add_course_package, adjust_package_balance, edit_student_profile, init_schema, list_today_lessons,
     record_lesson, rename_course_package, seed_data, set_student_active,
 )
 
@@ -43,6 +43,50 @@ def test_course_rename_keeps_balance_and_only_changes_selected_package(conn):
     changed = conn.execute('SELECT * FROM course_packages WHERE id=?', (p['id'],)).fetchone()
     assert changed['course_name'] == '乐理' and changed['current_balance'] == p['current_balance']
     assert tuple(package(conn, 'Lucas')) == other
+
+
+@pytest.mark.parametrize('course_name', ['钢琴', '  钢琴  '])
+def test_course_rename_rejects_duplicate_without_side_effects(conn, course_name):
+    p = package(conn)
+    rename_course_package(conn, user(conn), p['id'], '钢琴')
+    other_id = add_course_package(conn, p['student_id'], '钢琴课', p['teacher_id'], 7)
+    conn.commit()
+    before = history(conn)
+
+    with pytest.raises(ValueError, match='^该学生在这位老师名下已有同名课程$'):
+        rename_course_package(conn, user(conn), other_id, course_name)
+
+    conn.commit()
+    assert history(conn) == before
+    packages = conn.execute(
+        'SELECT id, course_name, current_balance FROM course_packages WHERE id IN (?, ?) ORDER BY id',
+        (p['id'], other_id),
+    ).fetchall()
+    assert [tuple(row) for row in packages] == [
+        (p['id'], '钢琴', p['current_balance']), (other_id, '钢琴课', 7),
+    ]
+
+
+def test_course_rename_allows_same_name_for_different_teacher(conn):
+    p = package(conn)
+    rename_course_package(conn, user(conn), p['id'], '钢琴')
+    teacher_id = conn.execute(
+        'SELECT id FROM teachers WHERE id!=? AND active=1', (p['teacher_id'],),
+    ).fetchone()[0]
+    other_id = add_course_package(conn, p['student_id'], '钢琴课', teacher_id, 7)
+    before_transactions = [tuple(row) for row in conn.execute('SELECT * FROM lesson_transactions ORDER BY id')]
+
+    assert rename_course_package(conn, user(conn), other_id, '  钢琴  ') == p['student_id']
+
+    packages = conn.execute(
+        'SELECT id, teacher_id, course_name, current_balance FROM course_packages WHERE id IN (?, ?) ORDER BY id',
+        (p['id'], other_id),
+    ).fetchall()
+    assert [tuple(row) for row in packages] == [
+        (p['id'], p['teacher_id'], '钢琴', p['current_balance']),
+        (other_id, teacher_id, '钢琴', 7),
+    ]
+    assert [tuple(row) for row in conn.execute('SELECT * FROM lesson_transactions ORDER BY id')] == before_transactions
 
 
 def test_adjust_records_actor_reason_before_after_and_matching_transaction(conn):
